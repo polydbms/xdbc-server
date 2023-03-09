@@ -11,11 +11,30 @@
 #include <boost/enable_shared_from_this.hpp>
 #include <thread>
 #include "/usr/include/postgresql/libpq-fe.h"
+#include <zstd.h>
 
 using namespace std;
 using namespace pqxx;
 using namespace boost::asio;
 using ip::tcp;
+
+void compress_buffer(boost::asio::mutable_buffer &buffer) {
+    const size_t max_compressed_size = ZSTD_compressBound(buffer.size());
+    void *const compressed_buffer = malloc(max_compressed_size);
+    const size_t compressed_size = ZSTD_compress(compressed_buffer, max_compressed_size,
+                                                 boost::asio::buffer_cast<const void *>(buffer),
+                                                 buffer.size(), 1);
+    if (ZSTD_isError(compressed_size)) {
+        // Handle error
+        const char *const error_message = ZSTD_getErrorName(compressed_size);
+        std::cerr << "Failed to compress buffer with zstd: " << error_message << std::endl;
+        free(compressed_buffer);
+        throw std::runtime_error("Failed to compress buffer with zstd");
+    }
+    const float compression_ratio = static_cast<float>(compressed_size) / buffer.size();
+    //std::cout << "Achieved compression ratio: " << compression_ratio << std::endl;
+    buffer = boost::asio::buffer(compressed_buffer, compressed_size);
+}
 
 int getMaxCtId(std::string tableName) {
     const char *conninfo;
@@ -619,7 +638,7 @@ bool PGServer::hasUnsent() {
     return false;
 }
 
-void PGServer::send(tcp::socket &socket) {
+void PGServer::send(tcp::socket &socket, bool compress) {
 
 
     auto start = std::chrono::steady_clock::now();
@@ -654,7 +673,17 @@ void PGServer::send(tcp::socket &socket) {
             sleepCtr++;
         }*/
         if (send) {
-            boost::asio::write(socket, boost::asio::buffer(bp[bufferId]));
+            boost::asio::mutable_buffer buffer = boost::asio::buffer(bp[bufferId]);
+            if (compress) {
+                std::vector<boost::asio::mutable_buffer> buffers;
+                compress_buffer(buffer);
+                //TODO: create more sophisticated header with checksum etc
+                std::array<size_t, 1> size{buffer.size()};
+                boost::asio::write(socket, boost::asio::buffer(size));
+            }
+
+            size_t bytes_sent = boost::asio::write(socket, boost::asio::buffer(buffer));
+            cout << "Sent bytes:" << bytes_sent << endl;
             totalSentBuffers += 1;
             //cout << "sent buffer " << bufferId << endl;
             flagArr[bufferId] = 1;
@@ -693,7 +722,7 @@ int PGServer::serve() {
 
 
     std::thread t1(&PGServer::readFromDB, this, 3);
-    std::thread t2(&PGServer::send, this, std::ref(socket_));
+    std::thread t2(&PGServer::send, this, std::ref(socket_), false);
 
     t1.join();
     t2.join();

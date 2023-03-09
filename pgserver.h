@@ -48,7 +48,7 @@ public:
 
     int serve();
 
-    void send(tcp::socket &socket);
+    void send(tcp::socket &socket, bool compress);
 
     void readFromDB(int x);
 
