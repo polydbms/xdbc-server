@@ -19,9 +19,23 @@ RUN /etc/init.d/postgresql start && psql --command "ALTER USER postgres WITH PAS
 	&& echo "listen_addresses='*'" >> /etc/postgresql/14/main/postgresql.conf
 
 
-#-------------------------------------------- Install XDBC and prerequisites -------------------------------------------
+#-------------------------------------------- Install Clickhouse ------------------
 
 USER root
+
+RUN apt-get install -y apt-transport-https ca-certificates dirmngr
+RUN GNUPGHOME=$(mktemp -d) && GNUPGHOME="$GNUPGHOME" gpg --no-default-keyring --keyring /usr/share/keyrings/clickhouse-keyring.gpg --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 8919F6BD2B48D754 \
+	&& rm -r "$GNUPGHOME" \
+	&& chmod +r /usr/share/keyrings/clickhouse-keyring.gpg
+
+RUN echo "deb [signed-by=/usr/share/keyrings/clickhouse-keyring.gpg] https://packages.clickhouse.com/deb stable main" | tee \
+    /etc/apt/sources.list.d/clickhouse.list
+RUN apt-get update
+
+RUN apt-get install -y clickhouse-server clickhouse-client
+
+
+#-------------------------------------------- Install XDBC and prerequisites -------------------------------------------
 
 RUN apt update && apt upgrade -qy
 
@@ -29,17 +43,19 @@ RUN apt-get install -y libabsl-dev libpq-dev libpqxx-dev
 
 RUN apt install -qy clang libboost-all-dev libabsl-dev
 
-RUN apt-get update \
-  && apt-get -y install build-essential libzstd-dev \
-  && apt-get install -y wget \
-  && rm -rf /var/lib/apt/lists/* \
-  && wget https://github.com/Kitware/CMake/releases/download/v3.22.1/cmake-3.22.1-linux-x86_64.sh \
-      -q -O /tmp/cmake-install.sh \
-      && chmod u+x /tmp/cmake-install.sh \
-      && mkdir /opt/cmake-3.22.1 \
-      && /tmp/cmake-install.sh --skip-license --prefix=/opt/cmake-3.22.1 \
-      && rm /tmp/cmake-install.sh \
-      && ln -s /opt/cmake-3.22.1/bin/* /usr/local/bin
+#RUN apt-get update \
+#  && apt-get -y install build-essential libzstd-dev \
+#  && apt-get install -y wget \
+#  && rm -rf /var/lib/apt/lists/* \
+#  && wget https://github.com/Kitware/CMake/releases/download/v3.22.1/cmake-3.22.1-linux-x86_64.sh \
+#      -q -O /tmp/cmake-install.sh \
+#      && chmod u+x /tmp/cmake-install.sh \
+#      && mkdir /opt/cmake-3.22.1 \
+#      && /tmp/cmake-install.sh --skip-license --prefix=/opt/cmake-3.22.1 \
+#      && rm /tmp/cmake-install.sh \
+#      && ln -s /opt/cmake-3.22.1/bin/* /usr/local/bin
+
+RUN apt install -qy cmake build-essential libzstd-dev
 
 RUN mkdir /xdbc-server
 
