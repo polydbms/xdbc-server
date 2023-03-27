@@ -1,12 +1,12 @@
-# postgres server 14 on ubuntu 20.04 image
-FROM ubuntu:focal
+# postgres server 14 on ubuntu 22.04 image
+FROM ubuntu:jammy
 
 ENV DEBIAN_FRONTEND noninteractive
 
 RUN apt-get update
 RUN apt-get upgrade -qy
 
-#-------------------------------------------- Install postgresql server (22.03.23 version:12) ------------------------------------
+#-------------------------------------------- Install postgresql server (22.03.23 version:14) ------------------------------------
 
 RUN apt-get install -qy --no-install-recommends postgresql
 
@@ -15,8 +15,8 @@ USER postgres
 RUN /etc/init.d/postgresql start && psql --command "ALTER USER postgres WITH PASSWORD 'post1234';" \
 	&& createdb -O postgres db1 \
 	&& /etc/init.d/postgresql stop \
-	&& echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/12/main/pg_hba.conf \
-	&& echo "listen_addresses='*'" >> /etc/postgresql/12/main/postgresql.conf
+	&& echo "host all  all    0.0.0.0/0  md5" >> /etc/postgresql/14/main/pg_hba.conf \
+	&& echo "listen_addresses='*'" >> /etc/postgresql/14/main/postgresql.conf
 
 
 #-------------------------------------------- Install XDBC and prerequisites -------------------------------------------
@@ -25,7 +25,7 @@ USER root
 
 RUN apt update && apt upgrade -qy
 
-RUN apt-get install -y libabsl-dev
+RUN apt-get install -y libabsl-dev libpq-dev libpqxx-dev
 
 RUN apt install -qy clang libboost-all-dev libabsl-dev
 
@@ -57,11 +57,11 @@ RUN make
 
 USER postgres
 
-ENV PATH /usr/lib/postgresql/12/bin:$PATH
+ENV PATH /usr/lib/postgresql/14/bin:$PATH
 
 EXPOSE 5432
 
 VOLUME /var/lib/postgresql/data
 
-CMD ["postgres","-D","/var/lib/postgresql/12/main","-c","config_file=/etc/postgresql/12/main/postgresql.conf"] 
+CMD ["postgres","-D","/var/lib/postgresql/14/main","-c","config_file=/etc/postgresql/14/main/postgresql.conf"] 
 
