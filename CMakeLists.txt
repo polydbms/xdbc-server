@@ -15,7 +15,7 @@ ENDIF(Boost_FOUND)
 SET(USED_LIBS ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_REGEX_LIBRARY})
 
 #add_definitions(-DUSE_SYSTEM_ABSEIL=OFF)
-add_executable(${PROJECT_NAME} main.cpp pg.cpp ch.cpp pgserver.cpp)
+add_executable(${PROJECT_NAME} main.cpp pg.cpp ch.cpp pgserver.cpp compresslibs.cpp compresslibs.h)
 #add_library(clickhouse-cpp SHARED IMPORTED)
 #set_property(TARGET clickhouse-cpp PROPERTY IMPORTED_LOCATION "/usr/local/lib/libclickhouse-cpp-lib.so")
 target_link_libraries(${PROJECT_NAME} ${ZSTD_LIBRARY_PATH} clickhouse-cpp-lib -lpqxx -lpq ${USED_LIBS})

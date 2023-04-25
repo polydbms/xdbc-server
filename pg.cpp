@@ -28,7 +28,8 @@ int pg_row() {
 
         pqxx::connection C("dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432");
         work tx(C);
-        auto stream = pqxx::stream_from::query(
+        // stream_from::query
+        auto stream = pqxx::stream_from(
                 tx, "SELECT name, points FROM score");
 
         while (stream >> lineitem)
@@ -46,7 +47,8 @@ int pg_row() {
         start = chrono::steady_clock::now();
         work tx1(C);
         tx1.exec0("TRUNCATE tmp");
-        auto stream1 = pqxx::stream_to::raw_table(tx1, "tmp");
+        // stream_to::raw_table
+        auto stream1 = pqxx::stream_to(tx1, "tmp");
 
         for (auto const &entry: lineitems)
             stream1 << entry;
@@ -57,7 +59,7 @@ int pg_row() {
         cout << "Write | Elapsed time in milliseconds: "
              << chrono::duration_cast<chrono::milliseconds>(end - start).count()
              << " ms" << endl;
-        C.close();
+        //C.close();
 
     } catch (const std::exception &e) {
         cerr << e.what() << std::endl;
@@ -118,7 +120,8 @@ int pg_col() {
 
         connection C("dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432");
         work tx(C);
-        auto stream = pqxx::stream_from::query(
+        //stream_from::query
+        auto stream = pqxx::stream_from(
                 tx, "SELECT * FROM pg1_sf1_lineitem");
 
         while (stream >> lineitem) {
@@ -154,7 +157,8 @@ int pg_col() {
 
         work tx1(C);
         tx1.exec0("TRUNCATE tmp");
-        auto stream1 = pqxx::stream_to::raw_table(tx1, "tmp");
+        // stream_to::raw_table
+        auto stream1 = pqxx::stream_to(tx1, "tmp");
 
         for (int i = 0; i < l_orderkey.size(); i++)
             stream1 << make_tuple(l_orderkey[i],
@@ -181,7 +185,7 @@ int pg_col() {
              << chrono::duration_cast<chrono::milliseconds>(end - start).count()
              << " ms" << endl;
 
-        C.close();
+        //C.close();
     } catch (const std::exception &e) {
         cerr << e.what() << std::endl;
         return 1;

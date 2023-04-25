@@ -269,7 +269,10 @@ void PGServer::readFromDB(int x) {
 
         connection C("dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432");
         work tx(C);
-        stream_from stream{tx, pqxx::from_table, tableName};
+
+        //stream_from stream{tx, pqxx::from_table, tableName};
+        stream_from stream{tx, tableName};
+
 
         int bufferTupleId = 0;
         int bufferId = 0;
@@ -674,6 +677,8 @@ void PGServer::send(tcp::socket &socket, bool compress) {
         }*/
         if (send) {
             boost::asio::mutable_buffer buffer = boost::asio::buffer(bp[bufferId]);
+
+
             if (compress) {
                 std::vector<boost::asio::mutable_buffer> buffers;
                 compress_buffer(buffer);
@@ -681,6 +686,7 @@ void PGServer::send(tcp::socket &socket, bool compress) {
                 std::array<size_t, 1> size{buffer.size()};
                 boost::asio::write(socket, boost::asio::buffer(size));
             }
+
 
             size_t bytes_sent = boost::asio::write(socket, boost::asio::buffer(buffer));
             cout << "Sent bytes:" << bytes_sent << endl;
