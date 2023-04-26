@@ -10,7 +10,7 @@ RUN apt-get upgrade -qy
 
 RUN apt update && apt upgrade -qy
 
-RUN apt-get install -y libabsl-dev libpq-dev libpqxx-dev
+RUN apt-get install -y libabsl-dev libpq-dev libpqxx-dev liblzo2-dev liblz4-dev
 
 RUN apt install -qy clang libboost-all-dev libabsl-dev
 
