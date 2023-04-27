@@ -78,12 +78,13 @@ void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
     }
     if (method == 4) {
         const size_t input_size = boost::asio::buffer_size(buffer);
-        const char* input_data = boost::asio::buffer_cast<const char*>(buffer);
+        const char *input_data = boost::asio::buffer_cast<const char *>(buffer);
 
         const size_t max_compressed_size = LZ4_compressBound(input_size);
         std::vector<char> compressed_data(max_compressed_size);
 
-        const int compressed_size = LZ4_compress_default(input_data, compressed_data.data(), input_size, max_compressed_size);
+        const int compressed_size = LZ4_compress_default(input_data, compressed_data.data(), input_size,
+                                                         max_compressed_size);
         if (compressed_size <= 0) {
             throw std::runtime_error("LZ4 compression failed");
         }
@@ -776,7 +777,7 @@ int PGServer::serve() {
     //waiting for connection
     acceptor_.accept(socket_);
     //read operation
-    tab/eName = read_(socket_);
+    tableName = read_(socket_);
 
     tableName.erase(std::remove(tableName.begin(), tableName.end(), '\n'), tableName.cend());
 
