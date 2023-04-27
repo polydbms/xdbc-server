@@ -12,28 +12,83 @@
 #include <thread>
 #include "/usr/include/postgresql/libpq-fe.h"
 #include <zstd.h>
+#include <snappy.h>
+#include <lzo/lzo1x.h>
+#include <lz4.h>
 
 using namespace std;
 using namespace pqxx;
 using namespace boost::asio;
 using ip::tcp;
 
-void compress_buffer(boost::asio::mutable_buffer &buffer) {
-    const size_t max_compressed_size = ZSTD_compressBound(buffer.size());
-    void *const compressed_buffer = malloc(max_compressed_size);
-    const size_t compressed_size = ZSTD_compress(compressed_buffer, max_compressed_size,
-                                                 boost::asio::buffer_cast<const void *>(buffer),
-                                                 buffer.size(), 1);
-    if (ZSTD_isError(compressed_size)) {
-        // Handle error
-        const char *const error_message = ZSTD_getErrorName(compressed_size);
-        std::cerr << "Failed to compress buffer with zstd: " << error_message << std::endl;
-        free(compressed_buffer);
-        throw std::runtime_error("Failed to compress buffer with zstd");
+void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
+    //1 zstd
+    //2 snappy
+    //3 lzo
+
+    if (method == 1) {
+        // Get the raw buffer pointer and size
+        char *data = boost::asio::buffer_cast<char *>(buffer);
+        size_t size = boost::asio::buffer_size(buffer);
+
+        // Compress the buffer in place
+        size_t compressed_size = ZSTD_compress(data, size, data, size, 1);
+
+        // Resize the buffer to the compressed size
+        buffer = boost::asio::buffer(data, compressed_size);
     }
-    const float compression_ratio = static_cast<float>(compressed_size) / buffer.size();
-    //std::cout << "Achieved compression ratio: " << compression_ratio << std::endl;
-    buffer = boost::asio::buffer(compressed_buffer, compressed_size);
+    if (method == 2) {
+        char *data = boost::asio::buffer_cast<char *>(buffer);
+        size_t size = boost::asio::buffer_size(buffer);
+
+        std::vector<char> compressed_data(snappy::MaxCompressedLength(size));
+        size_t compressed_size = 0;
+
+        snappy::RawCompress(data, size, compressed_data.data(), &compressed_size);
+
+        // Copy the compressed data back into the input buffer
+        buffer = boost::asio::buffer(compressed_data.data(), compressed_size);
+    }
+    if (method == 3) {
+
+        const std::size_t size = boost::asio::buffer_size(buffer);
+
+        // Create a temporary buffer to hold the compressed data
+        std::vector<char> compressed_data(size + size / 16 + 64 + 3);
+        lzo_voidp wrkmem = (lzo_voidp)
+        malloc(LZO1X_1_MEM_COMPRESS);
+        // Compress the data
+        lzo_uint compressed_size;
+        const int result = lzo1x_1_compress(
+                reinterpret_cast<const unsigned char *>(boost::asio::buffer_cast<const char *>(buffer)),
+                static_cast<lzo_uint>(size),
+                reinterpret_cast<unsigned char *>(&compressed_data[0]),
+                &compressed_size,
+                wrkmem
+        );
+
+        if (result != LZO_E_OK) {
+            throw std::runtime_error("lzo1x_1_compress failed");
+        }
+
+        // Copy the compressed data back to the input buffer
+        boost::asio::buffer_copy(buffer, boost::asio::buffer(compressed_data.data(), compressed_size));
+        free(wrkmem);
+    }
+    if (method == 4) {
+        const size_t input_size = boost::asio::buffer_size(buffer);
+        const char* input_data = boost::asio::buffer_cast<const char*>(buffer);
+
+        const size_t max_compressed_size = LZ4_compressBound(input_size);
+        std::vector<char> compressed_data(max_compressed_size);
+
+        const int compressed_size = LZ4_compress_default(input_data, compressed_data.data(), input_size, max_compressed_size);
+        if (compressed_size <= 0) {
+            throw std::runtime_error("LZ4 compression failed");
+        }
+
+        buffer = boost::asio::mutable_buffer(compressed_data.data(), compressed_size);
+    }
 }
 
 int getMaxCtId(std::string tableName) {
@@ -681,7 +736,7 @@ void PGServer::send(tcp::socket &socket, bool compress) {
 
             if (compress) {
                 std::vector<boost::asio::mutable_buffer> buffers;
-                compress_buffer(buffer);
+                compress_buffer(4, buffer);
                 //TODO: create more sophisticated header with checksum etc
                 std::array<size_t, 1> size{buffer.size()};
                 boost::asio::write(socket, boost::asio::buffer(size));
@@ -689,7 +744,7 @@ void PGServer::send(tcp::socket &socket, bool compress) {
 
 
             size_t bytes_sent = boost::asio::write(socket, boost::asio::buffer(buffer));
-            cout << "Sent bytes:" << bytes_sent << endl;
+            //cout << "Sent bytes:" << bytes_sent << endl;
             totalSentBuffers += 1;
             //cout << "sent buffer " << bufferId << endl;
             flagArr[bufferId] = 1;
@@ -728,7 +783,7 @@ int PGServer::serve() {
 
 
     std::thread t1(&PGServer::readFromDB, this, 3);
-    std::thread t2(&PGServer::send, this, std::ref(socket_), false);
+    std::thread t2(&PGServer::send, this, std::ref(socket_), true);
 
     t1.join();
     t2.join();
