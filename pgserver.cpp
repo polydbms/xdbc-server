@@ -25,6 +25,7 @@ void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
     //1 zstd
     //2 snappy
     //3 lzo
+    //4 lz4
 
     if (method == 1) {
         // Get the raw buffer pointer and size
@@ -736,7 +737,7 @@ void PGServer::send(tcp::socket &socket, bool compress) {
 
             if (compress) {
                 std::vector<boost::asio::mutable_buffer> buffers;
-                compress_buffer(4, buffer);
+                compress_buffer(1, buffer);
                 //TODO: create more sophisticated header with checksum etc
                 std::array<size_t, 1> size{buffer.size()};
                 boost::asio::write(socket, boost::asio::buffer(size));
@@ -775,7 +776,7 @@ int PGServer::serve() {
     //waiting for connection
     acceptor_.accept(socket_);
     //read operation
-    tableName = read_(socket_);
+    tab/eName = read_(socket_);
 
     tableName.erase(std::remove(tableName.begin(), tableName.end(), '\n'), tableName.cend());
 
@@ -783,7 +784,7 @@ int PGServer::serve() {
 
 
     std::thread t1(&PGServer::readFromDB, this, 3);
-    std::thread t2(&PGServer::send, this, std::ref(socket_), true);
+    std::thread t2(&PGServer::send, this, std::ref(socket_), false);
 
     t1.join();
     t2.join();
