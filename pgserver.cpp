@@ -36,7 +36,7 @@ void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
         size_t compressed_size = ZSTD_compress(data, size, data, size, 1);
 
         // Resize the buffer to the compressed size
-        buffer = boost::asio::buffer(data, compressed_size);
+        buffer = boost::asio::buffer(data, compressed_size);  //TODO irgendwas komisch
     }
     if (method == 2) {
         char *data = boost::asio::buffer_cast<char *>(buffer);
@@ -56,8 +56,7 @@ void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
 
         // Create a temporary buffer to hold the compressed data
         std::vector<char> compressed_data(size + size / 16 + 64 + 3);
-        lzo_voidp wrkmem = (lzo_voidp)
-        malloc(LZO1X_1_MEM_COMPRESS);
+        lzo_voidp wrkmem = (lzo_voidp) malloc(LZO1X_1_MEM_COMPRESS);
         // Compress the data
         lzo_uint compressed_size;
         const int result = lzo1x_1_compress(
