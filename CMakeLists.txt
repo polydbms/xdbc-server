@@ -21,4 +21,4 @@ SET(USED_LIBS ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_REGEX_LIBR
 add_executable(${PROJECT_NAME} main.cpp pg.cpp ch.cpp pgserver.cpp)
 #add_library(clickhouse-cpp SHARED IMPORTED)
 #set_property(TARGET clickhouse-cpp PROPERTY IMPORTED_LOCATION "/usr/local/lib/libclickhouse-cpp-lib.so")
-target_link_libraries(${PROJECT_NAME} clickhouse-cpp-lib -lpqxx -lpq ${USED_LIBS} lzo2 lz4)
+target_link_libraries(${PROJECT_NAME} clickhouse-cpp-lib -lpqxx -lpq ${USED_LIBS} lzo2 lz4 cityhash)
