@@ -94,20 +94,23 @@ void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
 }
 
 int getMaxCtId(std::string tableName) {
+
     const char *conninfo;
     PGconn *connection = NULL;
 
-    conninfo = "dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432";
+    conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
     connection = PQconnectdb(conninfo);
+
     PGresult *res;
     std::string qStr = "SELECT (MAX(ctid)::text::point)[0]::bigint AS maxctid FROM " + tableName;
     res = PQexec(connection, qStr.c_str());
 
     int fnum = PQfnumber(res, "maxctid");
+
     char *maxPtr = PQgetvalue(res, 0, fnum);
 
     int maxCtId = stoi(maxPtr);
-    cout << "max id: " << maxCtId << endl;
+
     PQfinish(connection);
     return maxCtId;
 }
@@ -135,8 +138,8 @@ int PGServer::pqWriteToBp(int thr, int from, long to, int &totalCnt) {
 
     int bufferTupleId;
 
-
-    conninfo = "dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432";
+    // TODO: attention! `hostAddr` is for IPs while `host` is for hostnames, handle correctly
+    conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
     connection = PQconnectdb(conninfo);
     string toStr = std::to_string(to);
     //check if last thread, then max range
@@ -324,7 +327,7 @@ void PGServer::readFromDB(int x) {
 
         tuple<int, int, int, int, double, double, double, double> lineitemTuple;
 
-        connection C("dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432");
+        connection C("dbname = db1 user = postgres password = 123456 host = pg1 port = 5432");
         work tx(C);
 
         //stream_from stream{tx, pqxx::from_table, tableName};
@@ -387,7 +390,7 @@ void PGServer::readFromDB(int x) {
 
         //TODO: explore PQsetSingleRowMode();
 
-        conninfo = "dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432";
+        conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
         conn = PQconnectdb(conninfo);
         res = PQexec(conn, ("SELECT * FROM " + tableName).c_str());
 
@@ -491,10 +494,15 @@ void PGServer::readFromDB(int x) {
         int xs[PARALLELISM];
         thread threads[PARALLELISM];
 
+        // TODO: throw something when table does not exist
+
+        cout << "deciding partitioning" << endl;
         int maxCtId = getMaxCtId(tableName);
 
+        cout << "partitioning upper bound: " << maxCtId << endl;
         int partSize = maxCtId / PARALLELISM;
 
+        cout << "starting threads" << endl;
         for (int i = 0; i < PARALLELISM; i++) {
 
             int startOff = i * partSize;
@@ -526,6 +534,8 @@ void PGServer::readFromDB(int x) {
             //thread th4(&PGServer::pqWriteToBp, this, 3, 72000, 100000, std::ref(x4));
         }
 
+        cout << "finished threads" << endl;
+
         int total = 0;
         for (int i = 0; i < PARALLELISM; i++) {
             threads[i].join();
@@ -546,7 +556,7 @@ void PGServer::readFromDB(int x) {
 
         int bufferId = 0;
 
-        conninfo = "dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432";
+        conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
         connection = PQconnectdb(conninfo);
         res = PQexec(connection,
                      ("COPY (SELECT * FROM " + tableName + ") TO STDOUT WITH (FORMAT text, DELIMITER '|')").c_str());

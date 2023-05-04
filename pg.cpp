@@ -26,7 +26,7 @@ int pg_row() {
         //start reading
         start = chrono::steady_clock::now();
 
-        pqxx::connection C("dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432");
+        pqxx::connection C("dbname = db1 user = postgres password = 123456 host = pg1 port = 5432");
         work tx(C);
         // stream_from::query
         auto stream = pqxx::stream_from(
@@ -118,7 +118,7 @@ int pg_col() {
         //start reading
         start = chrono::steady_clock::now();
 
-        connection C("dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432");
+        connection C("dbname = db1 user = postgres password = 123456  = pg1 port = 5432");
         work tx(C);
         //stream_from::query
         auto stream = pqxx::stream_from(
@@ -215,13 +215,15 @@ int pg_copy() {
     const int asynchronous = 1;
     PGresult *res;
 
-    conninfo = "dbname = db1 user = postgres password = 123456 hostaddr = 127.0.0.1 port = 15432";
+    conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
     connection = PQconnectdb(conninfo);
-    res = PQexec(connection, "COPY (SELECT * FROM test LIMIT 2) TO STDOUT WITH (FORMAT text, DELIMITER '|')");
+    res = PQexec(connection, "COPY (SELECT * FROM test_10000000 LIMIT 2) TO STDOUT WITH (FORMAT text, DELIMITER '|')");
     ExecStatusType resType = PQresultStatus(res);
 
     if (resType == PGRES_COPY_OUT)
         cout << "Result OK" << endl;
+    else if (resType == PGRES_FATAL_ERROR)
+        cout << "PG FATAL ERROR!" << endl;
     else
         cout << "Result of COPY is " << resType << endl;
 
