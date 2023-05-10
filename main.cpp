@@ -5,11 +5,67 @@
 #include "pgserver.h"
 #include <chrono>
 #include <thread>
+#include <boost/program_options.hpp>
 
 using namespace std;
+namespace po = boost::program_options;
 
+void handleCMDParams(int ac, char *av[]) {
+    // Declare the supported options.
+    po::options_description desc("Usage: ./xdbc-server [options]\n\nAllowed options");
+    desc.add_options()
+            ("help,h", "Produce this help message.")
+            ("compression-type,c", po::value<string>()->default_value("lz4"), "Set Compression algorithm: \nDefault:\n  lz4\nOther:\n  lzo\n  snapp\n  zstd")
+            ("buffer-size,b", po::value<int>()->default_value(1000),"Set buffer-size of buffers used to read data from the database.\nDefault: 1000")
+            ("bufferpool-size,p", po::value<int>()->default_value(1000),"Set the amount of buffers used.\nDefault: 1000")
+            ("tuple-size,t", po::value<int>()->default_value(48),"Set the tuple size.\nDefault: 48")
+            ("sleep-time,s", po::value<int>()->default_value(5),"Set a sleep-time in milli seconds.\nDefault: 5ms")
+            ("parallelism,P", po::value<int>()->default_value(4),"Set the parallelism grade.\nDefault: 4")
+            ;
 
-int main() {
+    po::positional_options_description p;
+    p.add("compression-type", 1);
+
+    po::variables_map vm;
+    po::store(po::command_line_parser(ac, av).options(desc).positional(p).run(), vm);
+    po::notify(vm);
+
+    if (vm.count("help")) {
+        cout << desc << "\n";
+        exit(0);
+    }
+
+    if (vm.count("compression-type")) {
+        cout << "Compression algorithm was set to "
+             << vm["compression-type"].as<string>() << ".\n";
+    }
+    if (vm.count("buffer-size")) {
+        cout << "Buffer-size: "
+             << vm["buffer-size"].as<int>() << ".\n";
+    }
+    if (vm.count("bufferpool-size")) {
+        cout << "Bufferpool-size: "
+             << vm["bufferpool-size"].as<int>() << ".\n";
+    }
+    if (vm.count("tuple-size")) {
+        cout << "Tuple-size "
+             << vm["tuple-size"].as<int>() << ".\n";
+    }
+    if (vm.count("sleep-time")) {
+        cout << "Sleep-time "
+             << vm["sleep-time"].as<int>() << "ms.\n";
+    }
+    if (vm.count("parallelism")) {
+        cout << "Parallelism "
+             << vm["parallelism"].as<int>() << ".\n";
+    }
+
+    exit(0);
+}
+
+int main(int argc, char *argv[]) {
+
+    handleCMDParams(argc, argv);
 
     int option = 5;
 
@@ -58,6 +114,7 @@ int main() {
 
     return 0;
 }
+
 
 class Lineitem {
 public:
