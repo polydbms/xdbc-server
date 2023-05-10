@@ -21,6 +21,11 @@ using namespace pqxx;
 using namespace boost::asio;
 using ip::tcp;
 
+//konstanten aus pfserver zu cmdline parameter machen
+//daten einlesen von libpq ordentlich machen und textfelder einlesen
+//criteo als zweiten datensatz?
+// coden mit docker?
+
 void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
     //1 zstd
     //2 snappy

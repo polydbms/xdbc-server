@@ -5,9 +5,10 @@
 #include "pgserver.h"
 #include <chrono>
 #include <thread>
+#include <boost/program_options.hpp>
 
 using namespace std;
-
+namespace po = boost::program_options;
 
 int main() {
 
