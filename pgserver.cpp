@@ -307,7 +307,7 @@ double double_swap(double d) {
     return dest.d;
 }
 
-PGServer::PGServer() : bp(), flagArr(), totalRead(), finishedReading(false), tableName() {
+PGServer::PGServer(const RuntimeEnv& env) : bp(), flagArr(), totalRead(), finishedReading(false), tableName() {
     bp.resize(BUFFERPOOL_SIZE * TUPLE_SIZE);
     for (int i = 0; i < BUFFERPOOL_SIZE; i++)
         flagArr[i] = 1;

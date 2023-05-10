@@ -10,6 +10,7 @@
 #include <boost/asio.hpp>
 #include <boost/bind.hpp>
 #include <boost/enable_shared_from_this.hpp>
+#include <utility>
 
 #define TOTAL_TUPLES 10000000
 #define BUFFER_SIZE 1000
@@ -22,6 +23,15 @@
 //TODO: benchmark all baselines libpq, libpqxx, csv, binary etc
 using namespace boost::asio;
 using ip::tcp;
+
+struct RuntimeEnv{
+    std::string compression_algorithm;
+    int buffer_size;
+    int bufferpool_size;
+    int tuple_size;
+    int sleep_time;
+    int parallelism;
+};
 
 struct shortLineitem {
     int l_orderkey;
@@ -36,13 +46,14 @@ struct shortLineitem {
 
 class PGServer {
 private:
+    RuntimeEnv pgEnv;
     std::vector<std::array<shortLineitem, BUFFER_SIZE>> bp;
-    std::array<std::atomic<int>, BUFFERPOOL_SIZE> flagArr;
-    int totalRead;
+    std::array<std::atomic<int>, BUFFERPOOL_SIZE> flagArr{};
+    int totalRead{};
     std::atomic<bool> finishedReading{};
     std::string tableName;
 public:
-    PGServer();
+    explicit PGServer(const RuntimeEnv&  env);
 
     //int read();
 

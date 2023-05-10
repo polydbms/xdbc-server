@@ -10,7 +10,7 @@
 using namespace std;
 namespace po = boost::program_options;
 
-void handleCMDParams(int ac, char *av[]) {
+RuntimeEnv handleCMDParams(int ac, char *av[]) {
     // Declare the supported options.
     po::options_description desc("Usage: ./xdbc-server [options]\n\nAllowed options");
     desc.add_options()
@@ -35,37 +35,45 @@ void handleCMDParams(int ac, char *av[]) {
         exit(0);
     }
 
+    RuntimeEnv env;
+
     if (vm.count("compression-type")) {
         cout << "Compression algorithm was set to "
              << vm["compression-type"].as<string>() << ".\n";
+        env.compression_algorithm=vm["compression-type"].as<string>();
     }
     if (vm.count("buffer-size")) {
         cout << "Buffer-size: "
              << vm["buffer-size"].as<int>() << ".\n";
+        env.buffer_size=vm["buffer-size"].as<int>();
     }
     if (vm.count("bufferpool-size")) {
         cout << "Bufferpool-size: "
              << vm["bufferpool-size"].as<int>() << ".\n";
+        env.bufferpool_size=vm["bufferpool-size"].as<int>();
     }
     if (vm.count("tuple-size")) {
         cout << "Tuple-size "
              << vm["tuple-size"].as<int>() << ".\n";
+        env.tuple_size=vm["tuple-size"].as<int>();
     }
     if (vm.count("sleep-time")) {
         cout << "Sleep-time "
              << vm["sleep-time"].as<int>() << "ms.\n";
+        env.sleep_time=vm["sleep-time"].as<int>();
     }
     if (vm.count("parallelism")) {
         cout << "Parallelism "
              << vm["parallelism"].as<int>() << ".\n";
+        env.parallelism=vm["parallelism"].as<int>();
     }
 
-    exit(0);
+    return env;
 }
 
 int main(int argc, char *argv[]) {
 
-    handleCMDParams(argc, argv);
+    RuntimeEnv pgEnv = handleCMDParams(argc, argv);
 
     int option = 5;
 
@@ -91,7 +99,7 @@ int main(int argc, char *argv[]) {
             break;
         case 5: {
             op = "pg server";
-            PGServer pgserver = PGServer();
+            PGServer pgserver = PGServer(pgEnv);
 
             pgserver.serve();
             break;
