@@ -14,7 +14,7 @@ RUN apt install -qy clang libboost-all-dev cmake build-essential git
 
 # install compression libs
 
-RUN apt install -qy libzstd-dev liblzo2-dev liblz4-dev libsnappy-dev
+RUN apt install -qy libzstd-dev liblzo2-dev liblz4-dev libsnappy-dev libbrotli-dev
 
 # install postgres dependencies
 
