@@ -17,6 +17,7 @@
 #define BUFFERPOOL_SIZE 1000
 #define TUPLE_SIZE 48
 #define SLEEP_TIME 5ms
+//TODO: deprecate parallelism constant as it is handled now by pgEnv
 #define PARALLELISM 4
 
 

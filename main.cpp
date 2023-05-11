@@ -15,13 +15,15 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     po::options_description desc("Usage: ./xdbc-server [options]\n\nAllowed options");
     desc.add_options()
             ("help,h", "Produce this help message.")
-            ("compression-type,c", po::value<string>()->default_value("lz4"), "Set Compression algorithm: \nDefault:\n  lz4\nOther:\n  lzo\n  snapp\n  zstd")
-            ("buffer-size,b", po::value<int>()->default_value(1000),"Set buffer-size of buffers used to read data from the database.\nDefault: 1000")
-            ("bufferpool-size,p", po::value<int>()->default_value(1000),"Set the amount of buffers used.\nDefault: 1000")
-            ("tuple-size,t", po::value<int>()->default_value(48),"Set the tuple size.\nDefault: 48")
-            ("sleep-time,s", po::value<int>()->default_value(5),"Set a sleep-time in milli seconds.\nDefault: 5ms")
-            ("parallelism,P", po::value<int>()->default_value(4),"Set the parallelism grade.\nDefault: 4")
-            ;
+            ("compression-type,c", po::value<string>()->default_value("lz4"),
+             "Set Compression algorithm: \nDefault:\n  lz4\nOther:\n  lzo\n  snappy\n  zstd")
+            ("buffer-size,b", po::value<int>()->default_value(1000),
+             "Set buffer-size of buffers used to read data from the database.\nDefault: 1000")
+            ("bufferpool-size,p", po::value<int>()->default_value(1000),
+             "Set the amount of buffers used.\nDefault: 1000")
+            ("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
+            ("sleep-time,s", po::value<int>()->default_value(5), "Set a sleep-time in milli seconds.\nDefault: 5ms")
+            ("parallelism,P", po::value<int>()->default_value(4), "Set the parallelism grade.\nDefault: 4");
 
     po::positional_options_description p;
     p.add("compression-type", 1);
@@ -40,32 +42,32 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     if (vm.count("compression-type")) {
         cout << "Compression algorithm was set to "
              << vm["compression-type"].as<string>() << ".\n";
-        env.compression_algorithm=vm["compression-type"].as<string>();
+        env.compression_algorithm = vm["compression-type"].as<string>();
     }
     if (vm.count("buffer-size")) {
         cout << "Buffer-size: "
              << vm["buffer-size"].as<int>() << ".\n";
-        env.buffer_size=vm["buffer-size"].as<int>();
+        env.buffer_size = vm["buffer-size"].as<int>();
     }
     if (vm.count("bufferpool-size")) {
         cout << "Bufferpool-size: "
              << vm["bufferpool-size"].as<int>() << ".\n";
-        env.bufferpool_size=vm["bufferpool-size"].as<int>();
+        env.bufferpool_size = vm["bufferpool-size"].as<int>();
     }
     if (vm.count("tuple-size")) {
         cout << "Tuple-size "
              << vm["tuple-size"].as<int>() << ".\n";
-        env.tuple_size=vm["tuple-size"].as<int>();
+        env.tuple_size = vm["tuple-size"].as<int>();
     }
     if (vm.count("sleep-time")) {
         cout << "Sleep-time "
              << vm["sleep-time"].as<int>() << "ms.\n";
-        env.sleep_time=vm["sleep-time"].as<int>();
+        env.sleep_time = vm["sleep-time"].as<int>();
     }
     if (vm.count("parallelism")) {
         cout << "Parallelism "
              << vm["parallelism"].as<int>() << ".\n";
-        env.parallelism=vm["parallelism"].as<int>();
+        env.parallelism = vm["parallelism"].as<int>();
     }
 
     return env;

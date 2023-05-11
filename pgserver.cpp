@@ -21,13 +21,14 @@ using namespace pqxx;
 using namespace boost::asio;
 using ip::tcp;
 
-void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
+void compress_buffer(string method, boost::asio::mutable_buffer &buffer) {
+
     //1 zstd
     //2 snappy
     //3 lzo
     //4 lz4
 
-    if (method == 1) {
+    if (method == "zstd") {
         // Get the raw buffer pointer and size
         char *data = boost::asio::buffer_cast<char *>(buffer);
         size_t size = boost::asio::buffer_size(buffer);
@@ -38,7 +39,7 @@ void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
         // Resize the buffer to the compressed size
         buffer = boost::asio::buffer(data, compressed_size);
     }
-    if (method == 2) {
+    if (method == "snappy") {
         char *data = boost::asio::buffer_cast<char *>(buffer);
         size_t size = boost::asio::buffer_size(buffer);
 
@@ -50,7 +51,7 @@ void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
         // Copy the compressed data back into the input buffer
         buffer = boost::asio::buffer(compressed_data.data(), compressed_size);
     }
-    if (method == 3) {
+    if (method == "lzo") {
 
         const std::size_t size = boost::asio::buffer_size(buffer);
 
@@ -76,7 +77,7 @@ void compress_buffer(int method, boost::asio::mutable_buffer &buffer) {
         boost::asio::buffer_copy(buffer, boost::asio::buffer(compressed_data.data(), compressed_size));
         free(wrkmem);
     }
-    if (method == 4) {
+    if (method == "lz4") {
         const size_t input_size = boost::asio::buffer_size(buffer);
         const char *input_data = boost::asio::buffer_cast<const char *>(buffer);
 
@@ -124,8 +125,8 @@ string read_(tcp::socket &socket) {
 
 int PGServer::pqWriteToBp(int thr, int from, long to, int &totalCnt) {
 
-    int minBId = thr * (BUFFERPOOL_SIZE / PARALLELISM);
-    int maxBId = (thr + 1) * (BUFFERPOOL_SIZE / PARALLELISM);
+    int minBId = thr * (BUFFERPOOL_SIZE / pgEnv.parallelism);
+    int maxBId = (thr + 1) * (BUFFERPOOL_SIZE / pgEnv.parallelism);
 
     cout << "Thread " << thr << " assigned (" << minBId << "," << maxBId << ")" << endl;
     int curBid = minBId;
@@ -311,7 +312,7 @@ PGServer::PGServer(const RuntimeEnv& env) : bp(), flagArr(), totalRead(), finish
     bp.resize(BUFFERPOOL_SIZE * TUPLE_SIZE);
     for (int i = 0; i < BUFFERPOOL_SIZE; i++)
         flagArr[i] = 1;
-
+    this->pgEnv = env;
 }
 
 
@@ -488,11 +489,12 @@ void PGServer::readFromDB(int x) {
 
     } else if (x == 3) {
 
-        cout << "Using pglib with COPY, parallelism: " << PARALLELISM << endl;
+        cout << "Using pglib with COPY, parallelism: " << pgEnv.parallelism << endl;
+        cout << "Using compression: " << pgEnv.compression_algorithm << endl;
 
 
-        int xs[PARALLELISM];
-        thread threads[PARALLELISM];
+        int xs[pgEnv.parallelism];
+        thread threads[pgEnv.parallelism];
 
         // TODO: throw something when table does not exist
 
@@ -500,10 +502,10 @@ void PGServer::readFromDB(int x) {
         int maxCtId = getMaxCtId(tableName);
 
         cout << "partitioning upper bound: " << maxCtId << endl;
-        int partSize = maxCtId / PARALLELISM;
+        int partSize = maxCtId / pgEnv.parallelism;
 
         cout << "starting threads" << endl;
-        for (int i = 0; i < PARALLELISM; i++) {
+        for (int i = 0; i < pgEnv.parallelism; i++) {
 
             int startOff = i * partSize;
             long endOff = (i + 1) * partSize;
@@ -524,7 +526,7 @@ void PGServer::readFromDB(int x) {
                 startOff = 72000;
                 endOff = 100000;
             }*/
-            if (i == PARALLELISM - 1)
+            if (i == pgEnv.parallelism - 1)
                 endOff = UINT32_MAX;
 
             threads[i] = std::thread(&PGServer::pqWriteToBp, this, i, startOff, endOff, std::ref(xs[i]));
@@ -537,7 +539,7 @@ void PGServer::readFromDB(int x) {
         cout << "finished threads" << endl;
 
         int total = 0;
-        for (int i = 0; i < PARALLELISM; i++) {
+        for (int i = 0; i < pgEnv.parallelism; i++) {
             threads[i].join();
             total += xs[i];
         }
@@ -748,10 +750,11 @@ void PGServer::send(tcp::socket &socket, bool compress) {
 
             if (compress) {
                 std::vector<boost::asio::mutable_buffer> buffers;
-                compress_buffer(1, buffer);
+                compress_buffer(pgEnv.compression_algorithm, buffer);
                 //TODO: create more sophisticated header with checksum etc
                 std::array<size_t, 1> size{buffer.size()};
                 boost::asio::write(socket, boost::asio::buffer(size));
+                //cout << "compressed buffer:" << buffer.size() << " ratio "<<  buffer.size()/(BUFFER_SIZE*TUPLE_SIZE)<< endl;
             }
 
 
