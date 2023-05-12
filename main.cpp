@@ -15,8 +15,8 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     po::options_description desc("Usage: ./xdbc-server [options]\n\nAllowed options");
     desc.add_options()
             ("help,h", "Produce this help message.")
-            ("compression-type,c", po::value<string>()->default_value("lz4"),
-             "Set Compression algorithm: \nDefault:\n  lz4\nOther:\n  lzo\n  snappy\n  zstd")
+            ("compression-type,c", po::value<string>()->default_value("nocomp"),
+             "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4")
             ("buffer-size,b", po::value<int>()->default_value(1000),
              "Set buffer-size of buffers used to read data from the database.\nDefault: 1000")
             ("bufferpool-size,p", po::value<int>()->default_value(1000),

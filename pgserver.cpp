@@ -58,7 +58,7 @@ void compress_buffer(string method, boost::asio::mutable_buffer &buffer) {
         // Create a temporary buffer to hold the compressed data
         std::vector<char> compressed_data(size + size / 16 + 64 + 3);
         lzo_voidp wrkmem = (lzo_voidp)
-        malloc(LZO1X_1_MEM_COMPRESS);
+                malloc(LZO1X_1_MEM_COMPRESS);
         // Compress the data
         lzo_uint compressed_size;
         const int result = lzo1x_1_compress(
@@ -308,7 +308,7 @@ double double_swap(double d) {
     return dest.d;
 }
 
-PGServer::PGServer(const RuntimeEnv& env) : bp(), flagArr(), totalRead(), finishedReading(false), tableName() {
+PGServer::PGServer(const RuntimeEnv &env) : bp(), flagArr(), totalRead(), finishedReading(false), tableName() {
     bp.resize(BUFFERPOOL_SIZE * TUPLE_SIZE);
     for (int i = 0; i < BUFFERPOOL_SIZE; i++)
         flagArr[i] = 1;
@@ -710,6 +710,22 @@ bool PGServer::hasUnsent() {
     return false;
 }
 
+size_t getCompId(string name)
+{
+    if(name=="nocomp")
+        return 0;
+    if(name=="zstd")
+        return 1;
+    if(name=="snappy")
+        return 2;
+    if(name=="lzo")
+        return 3;
+    if(name=="lz4")
+        return 4;
+
+    return 0;
+}
+
 void PGServer::send(tcp::socket &socket, bool compress) {
 
 
@@ -748,17 +764,22 @@ void PGServer::send(tcp::socket &socket, bool compress) {
             boost::asio::mutable_buffer buffer = boost::asio::buffer(bp[bufferId]);
 
 
-            if (compress) {
-                std::vector<boost::asio::mutable_buffer> buffers;
+            if (pgEnv.compression_algorithm != "nocomp") {
+                //std::vector<boost::asio::mutable_buffer> buffers;
                 compress_buffer(pgEnv.compression_algorithm, buffer);
-                //TODO: create more sophisticated header with checksum etc
-                std::array<size_t, 1> size{buffer.size()};
-                boost::asio::write(socket, boost::asio::buffer(size));
-                //cout << "compressed buffer:" << buffer.size() << " ratio "<<  buffer.size()/(BUFFER_SIZE*TUPLE_SIZE)<< endl;
             }
+            //cout << "compressed buffer:" << buffer.size() << " ratio "<<  buffer.size()/(BUFFER_SIZE*TUPLE_SIZE)<< endl;
 
+            //TODO: replace function with a hashmap or similar
+            //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4
+            size_t compId = getCompId(pgEnv.compression_algorithm);
+
+            //TODO: create more sophisticated header with checksum etc
+            std::array<size_t, 2> header{compId, buffer.size()};
+            boost::asio::write(socket, boost::asio::buffer(header));
 
             size_t bytes_sent = boost::asio::write(socket, boost::asio::buffer(buffer));
+
             //cout << "Sent bytes:" << bytes_sent << endl;
             totalSentBuffers += 1;
             //cout << "sent buffer " << bufferId << endl;
