@@ -2,10 +2,12 @@
 #include <iostream>
 #include "pg.h"
 #include "ch.h"
-#include "pgserver.h"
+#include "xdbcserver.h"
 #include <chrono>
 #include <thread>
 #include <boost/program_options.hpp>
+#include "spdlog/spdlog.h"
+#include "spdlog/sinks/stdout_color_sinks.h"
 
 using namespace std;
 namespace po = boost::program_options;
@@ -75,12 +77,13 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
 
 int main(int argc, char *argv[]) {
 
-    RuntimeEnv pgEnv = handleCMDParams(argc, argv);
+    RuntimeEnv xdbcEnv = handleCMDParams(argc, argv);
 
     int option = 5;
 
     auto start = std::chrono::steady_clock::now();
     string op = "";
+    //TODO: benchmark all baselines libpq, libpqxx, csv, binary etc
     switch (option) {
 
         case 1:
@@ -100,10 +103,11 @@ int main(int argc, char *argv[]) {
             ch_col();
             break;
         case 5: {
-            op = "pg server";
-            PGServer pgserver = PGServer(pgEnv);
+            op = "xdbc server";
+            auto console = spdlog::stdout_color_mt("XDBC.SERVER");
+            XDBCServer xdbcserver = XDBCServer(xdbcEnv);
 
-            pgserver.serve();
+            xdbcserver.serve();
             break;
         }
         case 6: {
@@ -117,10 +121,8 @@ int main(int argc, char *argv[]) {
     }
     auto end = std::chrono::steady_clock::now();
 
-    cout << op << " | Total Elapsed time in milliseconds: "
-         << std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count()
-         << " ms" << endl;
-
+    spdlog::get("XDBC.SERVER")->info("{0} | Total elapsed time: {1} ms",
+                                     op, std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
 
     return 0;
 }

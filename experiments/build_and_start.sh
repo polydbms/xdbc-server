@@ -1,14 +1,14 @@
 #!/bin/bash
-set -x
+#set -x
 #params
 #$1 docker container name
 CONTAINER=$1
 #$2 1: build & run, 2: only run, 3: only build
-OPTION=$2
-#$3 run params (for now compression library)
+BUILD_OPTION=$2
+#$3 run params (for now compression library, parallelism)
 RUNPARAMS=$3
 
-if [ $OPTION == 1 ] || [ $OPTION == 3 ]; then
+if [ $BUILD_OPTION == 1 ] || [ $BUILD_OPTION == 3 ]; then
   DIR=$(dirname $(dirname "$(realpath -- "$0")"))
   docker exec $CONTAINER bash -c "rm -rf xdbc-server && mkdir xdbc-server"
   #copy files
@@ -17,12 +17,16 @@ if [ $OPTION == 1 ] || [ $OPTION == 3 ]; then
       docker cp $file $CONTAINER:/xdbc-server/
     done
   done
+
+  docker cp ${DIR}/Compression/ $CONTAINER:/xdbc-server/
+  docker cp ${DIR}/DataSources/ $CONTAINER:/xdbc-server/
+
   #build
   docker exec $CONTAINER bash -c "cd xdbc-server && rm -rf build/ && mkdir build && cd build && cmake .. && make -j8"
 
 fi
 
 # start
-if [[ $OPTION != 3 ]]; then
-  docker exec $CONTAINER bash -c "cd xdbc-server/build && ./xdbc-server ${RUNPARAMS}"
+if [[ $BUILD_OPTION != 3 ]]; then
+  docker exec -t $CONTAINER bash -c "cd xdbc-server/build && ./xdbc-server ${RUNPARAMS}"
 fi

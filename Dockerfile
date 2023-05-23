@@ -12,9 +12,14 @@ RUN apt-get upgrade -qy
 
 RUN apt install -qy clang libboost-all-dev cmake build-essential git
 
+RUN git clone https://github.com/gabime/spdlog.git && cd spdlog && mkdir build && cd build &&  cmake .. && make -j && make install
+
 # install compression libs
 
 RUN apt install -qy libzstd-dev liblzo2-dev liblz4-dev libsnappy-dev libbrotli-dev
+
+RUN git clone https://github.com/LLNL/zfp.git && cd zfp && make
+
 
 # install postgres dependencies
 
@@ -40,11 +45,5 @@ RUN mkdir /xdbc-server
 COPY * /xdbc-server/
 
 RUN rm -rf /xdbc-server/build && mkdir /xdbc-server/build && cd /xdbc-server/build && cmake .. && make -j8
-
-#WORKDIR /xdbc-server/build
-
-#RUN cmake ..
-
-#RUN make
 
 ENTRYPOINT ["tail", "-f", "/dev/null"]
