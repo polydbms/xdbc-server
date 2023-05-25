@@ -35,13 +35,14 @@ struct shortLineitemColBatch {
 
 struct RuntimeEnv {
     std::string compression_algorithm;
+    int iformat;
     int buffer_size;
     int bufferpool_size;
     int tuple_size;
     int sleep_time;
     int parallelism;
     std::vector<std::atomic<int>> *flagArrPtr;
-    std::vector<std::vector<shortLineitem>> *bpPtr;
+    std::vector<std::vector<std::byte>> *bpPtr;
 };
 
 class PGReader {
@@ -59,9 +60,7 @@ public:
 
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;
-
-    std::vector<std::vector<shortLineitem>> &bp;
-
+    std::vector<std::vector<std::byte>> &bp;
     std::vector<std::atomic<int>> &flagArr;
     RuntimeEnv *xdbcEnv;
     std::string tableName;

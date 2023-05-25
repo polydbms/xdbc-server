@@ -52,16 +52,13 @@ XDBCServer::XDBCServer(const RuntimeEnv &env)
         flag = 1;
     }
 
-    bp.resize(env.bufferpool_size);
-    for (auto &buffer: bp) {
-        buffer.resize(env.buffer_size);
-    }
+    bp.resize(env.bufferpool_size, std::vector<std::byte>(env.buffer_size * env.tuple_size));
 
     xdbcEnv.flagArrPtr = &flagArr;
     xdbcEnv.bpPtr = &bp;
 
-    spdlog::get("XDBC.SERVER")->info("Created XDBC Server with BP size: {0}, TS: {1}",
-                                     bp.size(), env.tuple_size);
+    spdlog::get("XDBC.SERVER")->info("Created XDBC Server with BPS: {0} buffers, BS: {1} bytes, TS: {2} bytes",
+                                     bp.size(), env.buffer_size * env.tuple_size, env.tuple_size);
 
 }
 
@@ -123,20 +120,18 @@ int XDBCServer::send(tcp::socket &socket, PGReader &pgReader) {
         //TODO: create more sophisticated header with checksum etc
         //uint16_t checksum = compute_checksum(static_cast<const uint8_t *>(tmpBuff.data()), tmpBuff.size());
 
-        std::array<size_t, 3> header{compId, tmpBuff.size(), compute_crc(tmpBuff)};
+        std::array<size_t, 4> header{compId, tmpBuff.size(), compute_crc(tmpBuff),
+                                     static_cast<size_t>(xdbcEnv.iformat)};
         tmpHeaderBuff = boost::asio::buffer(header);
         tmpMsgBuff = boost::asio::buffer(tmpBuff);
         sendBuffer = {tmpHeaderBuff, tmpMsgBuff};
 
-
         try {
             totalSentBytes += boost::asio::write(socket, sendBuffer);
         } catch (const boost::system::system_error &e) {
-            std::cerr << "Error writing to socket: " << e.what() << std::endl;
+            spdlog::get("XDBC.SERVER")->error("Error writing to socket:  {0} ", e.what());
             // Handle the error...
         }
-
-
 
         //cout << "Sent bytes:" << bytes_sent << endl;
         totalSentBuffers.fetch_add(1);

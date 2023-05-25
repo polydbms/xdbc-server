@@ -92,7 +92,27 @@ void PGReader::readData(const std::string &tableName, int x) {
                             get<6>(lineitemTuple),
                             get<7>(lineitemTuple),
             };*/
-            bp[bufferId][bufferTupleId] = {get<0>(lineitemTuple),
+
+            //TODO: fix dynamic schema
+            int mv = bufferTupleId;
+            memcpy(bp[bufferId].data() + mv, &get<0>(lineitemTuple), 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &get<1>(lineitemTuple), 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &get<2>(lineitemTuple), 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &get<3>(lineitemTuple), 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &get<4>(lineitemTuple), 8);
+            mv += 8;
+            memcpy(bp[bufferId].data() + mv, &get<5>(lineitemTuple), 8);
+            mv += 8;
+            memcpy(bp[bufferId].data() + mv, &get<6>(lineitemTuple), 8);
+            mv += 8;
+            memcpy(bp[bufferId].data() + mv, &get<7>(lineitemTuple), 8);
+
+
+/*            bp[bufferId][bufferTupleId] = {get<0>(lineitemTuple),
                                            get<1>(lineitemTuple),
                                            get<2>(lineitemTuple),
                                            get<3>(lineitemTuple),
@@ -100,7 +120,7 @@ void PGReader::readData(const std::string &tableName, int x) {
                                            get<5>(lineitemTuple),
                                            get<6>(lineitemTuple),
                                            get<7>(lineitemTuple),
-            };
+            };*/
             totalCnt++;
             bufferTupleId++;
 
@@ -202,7 +222,26 @@ void PGReader::readData(const std::string &tableName, int x) {
                 sleepCtr++;
             }
 
-            bp[bufferId][bufferTupleId] = {l0val,
+            //TODO: fix dynamic schema
+            int mv = bufferTupleId;
+            memcpy(bp[bufferId].data() + mv, &l0val, 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &l1val, 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &l2val, 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &l3val, 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &l4val, 8);
+            mv += 8;
+            memcpy(bp[bufferId].data() + mv, &l5val, 8);
+            mv += 8;
+            memcpy(bp[bufferId].data() + mv, &l6val, 8);
+            mv += 8;
+            memcpy(bp[bufferId].data() + mv, &l7val, 8);
+
+
+            /*bp[bufferId][bufferTupleId] = {l0val,
                                            l1val,
                                            l2val,
                                            l3val,
@@ -210,7 +249,7 @@ void PGReader::readData(const std::string &tableName, int x) {
                                            l5val,
                                            l6val,
                                            l7val
-            };
+            };*/
 
             totalCnt++;
             bufferTupleId++;
@@ -254,7 +293,7 @@ void PGReader::readData(const std::string &tableName, int x) {
         for (int i = 0; i < xdbcEnv->parallelism; i++) {
 
             int startOff = i * partSize;
-            long endOff = ((i + 1) * partSize) ;
+            long endOff = ((i + 1) * partSize);
 
             if (i == xdbcEnv->parallelism - 1)
                 endOff = UINT32_MAX;
@@ -354,10 +393,26 @@ void PGReader::readData(const std::string &tableName, int x) {
                 sleepCtr++;
             }
 
+            //TODO: fix dynamic schema
+            int mv = bufferTupleId;
+            memcpy(bp[bufferId].data() + mv, &l03[0], 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &l03[1], 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &l03[2], 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &l03[3], 4);
+            mv += 4;
+            memcpy(bp[bufferId].data() + mv, &l47[0], 8);
+            mv += 8;
+            memcpy(bp[bufferId].data() + mv, &l47[1], 8);
+            mv += 8;
+            memcpy(bp[bufferId].data() + mv, &l47[2], 8);
+            mv += 8;
+            memcpy(bp[bufferId].data() + mv, &l47[3], 8);
 
-            bp[bufferId][bufferTupleId] = {l03[0], l03[1], l03[2], l03[3],
-                                           l47[0], l47[1], l47[2], l47[3]};
-
+            /*bp[bufferId][bufferTupleId] = {l03[0], l03[1], l03[2], l03[3],
+                                           l47[0], l47[1], l47[2], l47[3]};*/
 
             totalCnt++;
             bufferTupleId++;
@@ -376,15 +431,6 @@ void PGReader::readData(const std::string &tableName, int x) {
 
             }
 
-            /*cout << t.l_orderkey << " | "
-                 << t.l_partkey << " | "
-                 << t.l_suppkey << " | "
-                 << t.l_linenumber << " | "
-                 << t.l_quantity << " | "
-                 << t.l_extendedprice << " | "
-                 << t.l_discount << " | "
-                 << t.l_tax
-                 << endl;*/
             PQfreemem(receiveBuffer);
 
             receiveLength = PQgetCopyData(connection, &receiveBuffer, asynchronous);
@@ -476,13 +522,16 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
     char *endPtr;
     size_t len;
     //cout << "Thread: " << thr << " pg rcv len = " << receiveLength << endl;
+
+
+
     while (receiveLength > 0) {
+
         //cout << "Thread: " << thr << " pg rcv len = " << receiveLength << endl;
         int l03[4];
         double l47[4];
 
         char *startPtr = receiveBuffer;
-
 
         for (int i = 0; i < 7; i++) {
 
@@ -535,8 +584,48 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
 
         //spdlog::get("XDBC.SERVER")->info("writing to {0},{1}: ", curBid, bufferTupleId);
 
-        bp[curBid][bufferTupleId] = {l03[0], l03[1], l03[2], l03[3],
-                                     l47[0], l47[1], l47[2], l47[3]};
+        //TODO: fix dynamic schema
+        if (xdbcEnv->iformat == 1) {
+            int mv = bufferTupleId * (xdbcEnv->tuple_size);
+            memcpy(bp[curBid].data() + mv, &l03[0], 4);
+            mv += 4;
+            memcpy(bp[curBid].data() + mv, &l03[1], 4);
+            mv += 4;
+            memcpy(bp[curBid].data() + mv, &l03[2], 4);
+            mv += 4;
+            memcpy(bp[curBid].data() + mv, &l03[3], 4);
+            mv += 4;
+            memcpy(bp[curBid].data() + mv, &l47[0], 8);
+            mv += 8;
+            memcpy(bp[curBid].data() + mv, &l47[1], 8);
+            mv += 8;
+            memcpy(bp[curBid].data() + mv, &l47[2], 8);
+            mv += 8;
+            memcpy(bp[curBid].data() + mv, &l47[3], 8);
+        }
+        if (xdbcEnv->iformat == 2) {
+
+            int mv = bufferTupleId * 4;
+            memcpy(bp[curBid].data() + mv, &l03[0], 4);
+            mv += xdbcEnv->buffer_size * 4;
+            memcpy(bp[curBid].data() + mv, &l03[1], 4);
+            mv += xdbcEnv->buffer_size * 4;
+            memcpy(bp[curBid].data() + mv, &l03[2], 4);
+            mv += xdbcEnv->buffer_size * 4;
+            memcpy(bp[curBid].data() + mv, &l03[3], 4);
+            mv += xdbcEnv->buffer_size * 4;
+            memcpy(bp[curBid].data() + mv, &l47[0], 8);
+            mv += xdbcEnv->buffer_size * 8;
+            memcpy(bp[curBid].data() + mv, &l47[1], 8);
+            mv += xdbcEnv->buffer_size * 8;
+            memcpy(bp[curBid].data() + mv, &l47[2], 8);
+            mv += xdbcEnv->buffer_size * 8;
+            memcpy(bp[curBid].data() + mv, &l47[3], 8);
+        }
+        //spdlog::get("XDBC.SERVER")->info("Thread {0} wrote tuple: {1}", thr, totalThreadWrittenTuples);
+
+        /*bp[curBid][bufferTupleId] = {l03[0], l03[1], l03[2], l03[3],
+                                     l47[0], l47[1], l47[2], l47[3]};*/
 
         /*if (totalThreadWrittenBuffers == 0 && bufferTupleId == 0) {
             spdlog::get("XDBC.SERVER")->warn("tuple in thread {0}, tuple: [{1}]",
@@ -574,8 +663,57 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
                                          xdbcEnv->buffer_size - bufferTupleId);
 
         //TODO: remove dirty fix, potentially with buffer header or resizable buffers
-        for (int i = bufferTupleId; i < xdbcEnv->buffer_size; i++)
-            bp[curBid][bufferTupleId] = {-1, -1, -1, -1, -1, -1, -1, -1};
+        if (xdbcEnv->iformat == 1) {
+            for (int i = bufferTupleId; i < xdbcEnv->buffer_size; i++) {
+                int mone = -1;
+                double dmone = -1;
+                int mv = bufferTupleId * (xdbcEnv->tuple_size);
+
+                memcpy(bp[curBid].data() + mv, &mone, 4);
+                mv += 4;
+                memcpy(bp[curBid].data() + mv, &mone, 4);
+                mv += 4;
+                memcpy(bp[curBid].data() + mv, &mone, 4);
+                mv += 4;
+                memcpy(bp[curBid].data() + mv, &mone, 4);
+                mv += 4;
+                memcpy(bp[curBid].data() + mv, &dmone, 8);
+                mv += 8;
+                memcpy(bp[curBid].data() + mv, &dmone, 8);
+                mv += 8;
+                memcpy(bp[curBid].data() + mv, &dmone, 8);
+                mv += 8;
+                memcpy(bp[curBid].data() + mv, &dmone, 8);
+                //bp[curBid][bufferTupleId] = {-1, -1, -1, -1, -1, -1, -1, -1};
+            }
+
+        }
+
+        if (xdbcEnv->iformat == 2) {
+
+            int mv = bufferTupleId * 4;
+
+            int mone = -1;
+            double dmone = -1;
+
+            memcpy(bp[curBid].data() + mv, &mone, 4);
+            mv += xdbcEnv->buffer_size * 4;
+            memcpy(bp[curBid].data() + mv, &mone, 4);
+            mv += xdbcEnv->buffer_size * 4;
+            memcpy(bp[curBid].data() + mv, &mone, 4);
+            mv += xdbcEnv->buffer_size * 4;
+            memcpy(bp[curBid].data() + mv, &mone, 4);
+            mv += xdbcEnv->buffer_size * 4;
+            memcpy(bp[curBid].data() + mv, &dmone, 8);
+            mv += xdbcEnv->buffer_size * 8;
+            memcpy(bp[curBid].data() + mv, &dmone, 8);
+            mv += xdbcEnv->buffer_size * 8;
+            memcpy(bp[curBid].data() + mv, &dmone, 8);
+            mv += xdbcEnv->buffer_size * 8;
+            memcpy(bp[curBid].data() + mv, &dmone, 8);
+
+        }
+
         flagArr[curBid] = 0;
         totalReadBuffers.fetch_add(1);
         totalThreadWrittenBuffers++;
@@ -583,7 +721,7 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
     /* we now check the last received length returned by copy data */
     if (receiveLength == 0) {
         /* we cannot read more data without blocking */
-        cout << "Received 0" << endl;
+        spdlog::get("XDBC.SERVER")->warn("PG Reader received 0");
     } else if (receiveLength == -1) {
         /* received copy done message */
         PGresult *result = PQgetResult(connection);
