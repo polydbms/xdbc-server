@@ -12,9 +12,19 @@
 
 class Compressor {
 public:
+    static size_t getCompId(std::string name);
+
     static void compress_buffer(std::string method, boost::asio::mutable_buffer &buffer);
 
-    static size_t getCompId(std::string name);
+    static void compress_zstd(boost::asio::mutable_buffer &buffer);
+
+    static void compress_snappy(boost::asio::mutable_buffer &buffer);
+
+    static void compress_lzo(boost::asio::mutable_buffer &buffer);
+
+    static void compress_lz4(boost::asio::mutable_buffer &buffer);
+
+
 };
 
 
