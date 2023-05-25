@@ -10,7 +10,7 @@
 #include <atomic>
 
 #include "Compression/Compressor.h"
-#include "DataSources/PGReader.h"
+#include "DataSources/PGReader/PGReader.h"
 #include "spdlog/spdlog.h"
 
 

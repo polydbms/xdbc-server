@@ -60,56 +60,51 @@ int PGReader::getMaxCtId(std::string tableName) {
     return maxCtId;
 }
 
-void PGReader::readData(const std::string &tableName, int x) {
-    auto start = std::chrono::steady_clock::now();
+int PGReader::read_pqxx_stream() {
     int totalCnt = 0;
+    spdlog::get("XDBC.SERVER")->info("Using pqxx::stream_from");
 
-    if (x == 1) {
-        cout << "Using pqxx::stream_from" << endl;
-        //vector<lineitem> ls;
-        //array<shortLineitem, BUFFER_SIZE> ls;
+    tuple<int, int, int, int, double, double, double, double> lineitemTuple;
 
-        tuple<int, int, int, int, double, double, double, double> lineitemTuple;
+    connection C("dbname = db1 user = postgres password = 123456 host = pg1 port = 5432");
+    work tx(C);
 
-        connection C("dbname = db1 user = postgres password = 123456 host = pg1 port = 5432");
-        work tx(C);
-
-        //stream_from stream{tx, pqxx::from_table, tableName};
-        stream_from stream{tx, tableName};
+    //stream_from stream{tx, pqxx::from_table, tableName};
+    stream_from stream{tx, tableName};
 
 
-        int bufferTupleId = 0;
-        int bufferId = 0;
-        while (stream >> lineitemTuple) {
+    int bufferTupleId = 0;
+    int bufferId = 0;
+    while (stream >> lineitemTuple) {
 
 
-            /*shortLineitem l{get<0>(lineitemTuple),
-                            get<1>(lineitemTuple),
-                            get<2>(lineitemTuple),
-                            get<3>(lineitemTuple),
-                            get<4>(lineitemTuple),
-                            get<5>(lineitemTuple),
-                            get<6>(lineitemTuple),
-                            get<7>(lineitemTuple),
-            };*/
+        /*shortLineitem l{get<0>(lineitemTuple),
+                        get<1>(lineitemTuple),
+                        get<2>(lineitemTuple),
+                        get<3>(lineitemTuple),
+                        get<4>(lineitemTuple),
+                        get<5>(lineitemTuple),
+                        get<6>(lineitemTuple),
+                        get<7>(lineitemTuple),
+        };*/
 
-            //TODO: fix dynamic schema
-            int mv = bufferTupleId;
-            memcpy(bp[bufferId].data() + mv, &get<0>(lineitemTuple), 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &get<1>(lineitemTuple), 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &get<2>(lineitemTuple), 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &get<3>(lineitemTuple), 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &get<4>(lineitemTuple), 8);
-            mv += 8;
-            memcpy(bp[bufferId].data() + mv, &get<5>(lineitemTuple), 8);
-            mv += 8;
-            memcpy(bp[bufferId].data() + mv, &get<6>(lineitemTuple), 8);
-            mv += 8;
-            memcpy(bp[bufferId].data() + mv, &get<7>(lineitemTuple), 8);
+        //TODO: fix dynamic schema
+        int mv = bufferTupleId;
+        memcpy(bp[bufferId].data() + mv, &get<0>(lineitemTuple), 4);
+        mv += 4;
+        memcpy(bp[bufferId].data() + mv, &get<1>(lineitemTuple), 4);
+        mv += 4;
+        memcpy(bp[bufferId].data() + mv, &get<2>(lineitemTuple), 4);
+        mv += 4;
+        memcpy(bp[bufferId].data() + mv, &get<3>(lineitemTuple), 4);
+        mv += 4;
+        memcpy(bp[bufferId].data() + mv, &get<4>(lineitemTuple), 8);
+        mv += 8;
+        memcpy(bp[bufferId].data() + mv, &get<5>(lineitemTuple), 8);
+        mv += 8;
+        memcpy(bp[bufferId].data() + mv, &get<6>(lineitemTuple), 8);
+        mv += 8;
+        memcpy(bp[bufferId].data() + mv, &get<7>(lineitemTuple), 8);
 
 
 /*            bp[bufferId][bufferTupleId] = {get<0>(lineitemTuple),
@@ -121,358 +116,232 @@ void PGReader::readData(const std::string &tableName, int x) {
                                            get<6>(lineitemTuple),
                                            get<7>(lineitemTuple),
             };*/
-            totalCnt++;
-            bufferTupleId++;
+        totalCnt++;
+        bufferTupleId++;
 
-            if (bufferTupleId == xdbcEnv->buffer_size) {
-                //cout << "wrote buffer " << bufferId << endl;
-                bufferTupleId = 0;
-                flagArr[bufferId] = 0;
+        if (bufferTupleId == xdbcEnv->buffer_size) {
+            //cout << "wrote buffer " << bufferId << endl;
+            bufferTupleId = 0;
+            flagArr[bufferId] = 0;
 
-                bufferId++;
+            bufferId++;
 
-                if (bufferId == xdbcEnv->bufferpool_size)
-                    bufferId = 0;
-
-            }
+            if (bufferId == xdbcEnv->bufferpool_size)
+                bufferId = 0;
 
         }
 
-        stream.complete();
-        tx.commit();
-    } else if (x == 2) {
-        cout << "Using libpq with PQexec" << endl;
-        const char *conninfo;
-        PGconn *conn;
-        PGresult *res;
-        int nFields;
-        int l0_fnum, l1_fnum, l2_fnum, l3_fnum, l4_fnum, l5_fnum, l6_fnum, l7_fnum;
+    }
 
-        int i, bufferTupleId;
+    stream.complete();
+    tx.commit();
+    return totalCnt;
+}
 
-        int bufferId = 0;
+int PGReader::read_pq_exec() {
+    int totalCnt = 0;
 
-        //TODO: explore PQsetSingleRowMode();
+    cout << "Using libpq with PQexec" << endl;
+    const char *conninfo;
+    PGconn *conn;
+    PGresult *res;
+    int nFields;
+    int l0_fnum, l1_fnum, l2_fnum, l3_fnum, l4_fnum, l5_fnum, l6_fnum, l7_fnum;
 
-        conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
-        conn = PQconnectdb(conninfo);
-        res = PQexec(conn, ("SELECT * FROM " + tableName).c_str());
+    int i, bufferTupleId;
+
+    int bufferId = 0;
+
+    //TODO: explore PQsetSingleRowMode();
+
+    conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
+    conn = PQconnectdb(conninfo);
+    res = PQexec(conn, ("SELECT * FROM " + tableName).c_str());
 
 
-        l0_fnum = PQfnumber(res, "l_orderkey");
-        l1_fnum = PQfnumber(res, "l_partkey");
-        l2_fnum = PQfnumber(res, "l_suppkey");
-        l3_fnum = PQfnumber(res, "l_linenumber");
-        l4_fnum = PQfnumber(res, "l_quantity");
-        l5_fnum = PQfnumber(res, "l_extendedprice");
-        l6_fnum = PQfnumber(res, "l_discount");
-        l7_fnum = PQfnumber(res, "l_tax");
+    l0_fnum = PQfnumber(res, "l_orderkey");
+    l1_fnum = PQfnumber(res, "l_partkey");
+    l2_fnum = PQfnumber(res, "l_suppkey");
+    l3_fnum = PQfnumber(res, "l_linenumber");
+    l4_fnum = PQfnumber(res, "l_quantity");
+    l5_fnum = PQfnumber(res, "l_extendedprice");
+    l6_fnum = PQfnumber(res, "l_discount");
+    l7_fnum = PQfnumber(res, "l_tax");
 
-        //totalTuples = PQntuples(res);
+    //totalTuples = PQntuples(res);
 
-        for (i = 0; i < PQntuples(res); i++) {
-            char *l0ptr;
-            char *l1ptr;
-            char *l2ptr;
-            char *l3ptr;
-            char *l4ptr;
-            char *l5ptr;
-            char *l6ptr;
-            char *l7ptr;
-            int l0val, l1val, l2val, l3val;
-            double l4val, l5val, l6val, l7val;
-            //for binary, change endianness:
-            // l7val = double_swap(*((double *) l4ptr));
-            // l3val = ntohl(*((uint32_t *) l3ptr));
-            l0ptr = PQgetvalue(res, i, l0_fnum);
-            l1ptr = PQgetvalue(res, i, l1_fnum);
-            l2ptr = PQgetvalue(res, i, l2_fnum);
-            l3ptr = PQgetvalue(res, i, l3_fnum);
-            l4ptr = PQgetvalue(res, i, l4_fnum);
-            l5ptr = PQgetvalue(res, i, l5_fnum);
-            l6ptr = PQgetvalue(res, i, l6_fnum);
-            l7ptr = PQgetvalue(res, i, l7_fnum);
+    for (i = 0; i < PQntuples(res); i++) {
+        char *l0ptr;
+        char *l1ptr;
+        char *l2ptr;
+        char *l3ptr;
+        char *l4ptr;
+        char *l5ptr;
+        char *l6ptr;
+        char *l7ptr;
+        int l0val, l1val, l2val, l3val;
+        double l4val, l5val, l6val, l7val;
+        //for binary, change endianness:
+        // l7val = double_swap(*((double *) l4ptr));
+        // l3val = ntohl(*((uint32_t *) l3ptr));
+        l0ptr = PQgetvalue(res, i, l0_fnum);
+        l1ptr = PQgetvalue(res, i, l1_fnum);
+        l2ptr = PQgetvalue(res, i, l2_fnum);
+        l3ptr = PQgetvalue(res, i, l3_fnum);
+        l4ptr = PQgetvalue(res, i, l4_fnum);
+        l5ptr = PQgetvalue(res, i, l5_fnum);
+        l6ptr = PQgetvalue(res, i, l6_fnum);
+        l7ptr = PQgetvalue(res, i, l7_fnum);
 
-            l0val = stoi(l0ptr);
-            l1val = stoi(l1ptr);
-            l2val = stoi(l2ptr);
-            l3val = stoi(l3ptr);
-            l4val = stod(l4ptr);
-            l5val = stod(l5ptr);
-            l6val = stod(l6ptr);
-            l7val = stod(l7ptr);
+        l0val = stoi(l0ptr);
+        l1val = stoi(l1ptr);
+        l2val = stoi(l2ptr);
+        l3val = stoi(l3ptr);
+        l4val = stod(l4ptr);
+        l5val = stod(l5ptr);
+        l6val = stod(l6ptr);
+        l7val = stod(l7ptr);
 
-            /*bp[bufferId][bufferTupleId] = {stoi(PQgetvalue(res, i, l0_fnum)),
-                        stoi(PQgetvalue(res, i, l1_fnum)),
-                        stoi(PQgetvalue(res, i, l2_fnum)),
-                        stoi(PQgetvalue(res, i, l3_fnum)),
-                        stod(PQgetvalue(res, i, l4_fnum)),
-                        stod(PQgetvalue(res, i, l5_fnum)),
-                        stod(PQgetvalue(res, i, l6_fnum)),
-                        stod(PQgetvalue(res, i, l7_fnum))
+        /*bp[bufferId][bufferTupleId] = {stoi(PQgetvalue(res, i, l0_fnum)),
+                    stoi(PQgetvalue(res, i, l1_fnum)),
+                    stoi(PQgetvalue(res, i, l2_fnum)),
+                    stoi(PQgetvalue(res, i, l3_fnum)),
+                    stod(PQgetvalue(res, i, l4_fnum)),
+                    stod(PQgetvalue(res, i, l5_fnum)),
+                    stod(PQgetvalue(res, i, l6_fnum)),
+                    stod(PQgetvalue(res, i, l7_fnum))
+    };*/
+        int sleepCtr = 0;
+        while (flagArr[bufferId] == 0) {
+            if (sleepCtr == 1000) {
+                sleepCtr = 0;
+                cout << "Read: Stuck at buffer " << bufferId << " not ready to be written at tuple " << totalCnt
+                     << " and tuple " << i << endl;
+            }
+            //std::this_thread::sleep_for(SLEEP_TIME);
+            sleepCtr++;
+        }
+
+        //TODO: fix dynamic schema
+        int mv = bufferTupleId;
+        memcpy(bp[bufferId].data() + mv, &l0val, 4);
+        mv += 4;
+        memcpy(bp[bufferId].data() + mv, &l1val, 4);
+        mv += 4;
+        memcpy(bp[bufferId].data() + mv, &l2val, 4);
+        mv += 4;
+        memcpy(bp[bufferId].data() + mv, &l3val, 4);
+        mv += 4;
+        memcpy(bp[bufferId].data() + mv, &l4val, 8);
+        mv += 8;
+        memcpy(bp[bufferId].data() + mv, &l5val, 8);
+        mv += 8;
+        memcpy(bp[bufferId].data() + mv, &l6val, 8);
+        mv += 8;
+        memcpy(bp[bufferId].data() + mv, &l7val, 8);
+
+
+        /*bp[bufferId][bufferTupleId] = {l0val,
+                                       l1val,
+                                       l2val,
+                                       l3val,
+                                       l4val,
+                                       l5val,
+                                       l6val,
+                                       l7val
         };*/
-            int sleepCtr = 0;
-            while (flagArr[bufferId] == 0) {
-                if (sleepCtr == 1000) {
-                    sleepCtr = 0;
-                    cout << "Read: Stuck at buffer " << bufferId << " not ready to be written at tuple " << totalCnt
-                         << " and tuple " << i << endl;
-                }
-                //std::this_thread::sleep_for(SLEEP_TIME);
-                sleepCtr++;
-            }
 
-            //TODO: fix dynamic schema
-            int mv = bufferTupleId;
-            memcpy(bp[bufferId].data() + mv, &l0val, 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &l1val, 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &l2val, 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &l3val, 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &l4val, 8);
-            mv += 8;
-            memcpy(bp[bufferId].data() + mv, &l5val, 8);
-            mv += 8;
-            memcpy(bp[bufferId].data() + mv, &l6val, 8);
-            mv += 8;
-            memcpy(bp[bufferId].data() + mv, &l7val, 8);
+        totalCnt++;
+        bufferTupleId++;
 
+        if (bufferTupleId == xdbcEnv->buffer_size) {
+            //cout << "wrote buffer " << bufferId << endl;
+            bufferTupleId = 0;
+            flagArr[bufferId] = 0;
 
-            /*bp[bufferId][bufferTupleId] = {l0val,
-                                           l1val,
-                                           l2val,
-                                           l3val,
-                                           l4val,
-                                           l5val,
-                                           l6val,
-                                           l7val
-            };*/
+            bufferId++;
 
-            totalCnt++;
-            bufferTupleId++;
+            if (bufferId == xdbcEnv->bufferpool_size)
+                bufferId = 0;
 
-            if (bufferTupleId == xdbcEnv->buffer_size) {
-                //cout << "wrote buffer " << bufferId << endl;
-                bufferTupleId = 0;
-                flagArr[bufferId] = 0;
-
-                bufferId++;
-
-                if (bufferId == xdbcEnv->bufferpool_size)
-                    bufferId = 0;
-
-            }
-        }
-
-        PQfinish(conn);
-
-    } else if (x == 3) {
-
-        spdlog::get("XDBC.SERVER")->info("Using pglib with COPY, parallelism: {0}", xdbcEnv->parallelism);
-        spdlog::get("XDBC.SERVER")->info("Using compression: {0}", xdbcEnv->compression_algorithm);
-
-        int threadWrittenTuples[xdbcEnv->parallelism];
-        int threadWrittenBuffers[xdbcEnv->parallelism];
-        thread threads[xdbcEnv->parallelism];
-
-        // TODO: throw something when table does not exist
-
-        //cout << "deciding partitioning" << endl;
-        int maxCtId = getMaxCtId(tableName);
-
-        //cout << "partitioning upper bound: " << maxCtId << endl;
-        div_t div1 = div(maxCtId, xdbcEnv->parallelism);
-        int partSize = div1.quot;
-        if (div1.rem > 0)
-            partSize += 1;
-
-        //cout << "starting threads" << endl;
-        for (int i = 0; i < xdbcEnv->parallelism; i++) {
-
-            int startOff = i * partSize;
-            long endOff = ((i + 1) * partSize);
-
-            if (i == xdbcEnv->parallelism - 1)
-                endOff = UINT32_MAX;
-
-            threads[i] = std::thread(&PGReader::pqWriteToBp, this, i, startOff, endOff,
-                                     std::ref(threadWrittenTuples[i]), std::ref(threadWrittenBuffers[i]));
-            threadWrittenTuples[i] = 0;
-            threadWrittenBuffers[i] = 0;
-
-        }
-
-        //cout << "Read threads spawned" << endl;
-
-        int total = 0;
-        for (int i = 0; i < xdbcEnv->parallelism; i++) {
-            threads[i].join();
-            total += threadWrittenTuples[i];
-        }
-        finishedReading = true;
-        totalCnt += total;
-    } else if (x == 4) {
-
-        cout << "Using pglib with COPY" << endl;
-        const char *conninfo;
-        PGconn *connection = NULL;
-        char *receiveBuffer = NULL;
-        int receiveLength = 0;
-        const int asynchronous = 0;
-        PGresult *res;
-
-        int bufferTupleId;
-
-        int bufferId = 0;
-
-        conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
-        connection = PQconnectdb(conninfo);
-        res = PQexec(connection,
-                     ("COPY (SELECT * FROM " + tableName + ") TO STDOUT WITH (FORMAT text, DELIMITER '|')").c_str());
-        ExecStatusType resType = PQresultStatus(res);
-
-        if (resType == PGRES_COPY_OUT)
-            cout << "Result OK" << endl;
-        else
-            cout << "Result of COPY is " << resType << endl;
-
-
-        receiveLength = PQgetCopyData(connection, &receiveBuffer, asynchronous);
-
-
-        char *endPtr;
-        size_t len;
-
-        while (receiveLength > 0) {
-            //cout << "rcv len = " << receiveLength << endl;
-            int l03[4];
-            double l47[4];
-
-            char *startPtr = receiveBuffer;
-
-
-            for (int i = 0; i < 7; i++) {
-
-                endPtr = strchr(startPtr, '|');
-                len = endPtr - startPtr;
-                char tmp[len + 1];
-                memcpy(tmp, startPtr, len);
-                tmp[len] = '\0';
-                //l0 = stoi(tmp);
-                startPtr = endPtr + 1;
-                if (i < 4) {
-                    l03[i] = stoi(tmp);
-
-                } else {
-                    l47[i - 4] = stod(tmp);
-
-                }
-
-            }
-            endPtr = strchr(startPtr, '\0');
-            len = endPtr - startPtr;
-            char tmp[len + 1];
-            memcpy(tmp, startPtr, len);
-            tmp[len] = '\0';
-
-
-            l47[3] = stod(tmp);
-
-
-            int sleepCtr = 0;
-            while (flagArr[bufferId] == 0) {
-                if (sleepCtr == 1000) {
-                    sleepCtr = 0;
-                    cout << "Read: Stuck at buffer " << bufferId << " not ready to be written at tuple " << totalCnt
-                         << " and tuple " << totalCnt << endl;
-                }
-                std::this_thread::sleep_for(SLEEP_TIME);
-                sleepCtr++;
-            }
-
-            //TODO: fix dynamic schema
-            int mv = bufferTupleId;
-            memcpy(bp[bufferId].data() + mv, &l03[0], 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &l03[1], 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &l03[2], 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &l03[3], 4);
-            mv += 4;
-            memcpy(bp[bufferId].data() + mv, &l47[0], 8);
-            mv += 8;
-            memcpy(bp[bufferId].data() + mv, &l47[1], 8);
-            mv += 8;
-            memcpy(bp[bufferId].data() + mv, &l47[2], 8);
-            mv += 8;
-            memcpy(bp[bufferId].data() + mv, &l47[3], 8);
-
-            /*bp[bufferId][bufferTupleId] = {l03[0], l03[1], l03[2], l03[3],
-                                           l47[0], l47[1], l47[2], l47[3]};*/
-
-            totalCnt++;
-            bufferTupleId++;
-
-            if (bufferTupleId == xdbcEnv->buffer_size) {
-                //cout << "wrote buffer " << bufferId << endl;
-                bufferTupleId = 0;
-                flagArr[bufferId] = 0;
-
-                totalReadBuffers.fetch_add(1);
-
-                bufferId++;
-
-                if (bufferId == xdbcEnv->bufferpool_size)
-                    bufferId = 0;
-
-            }
-
-            PQfreemem(receiveBuffer);
-
-            receiveLength = PQgetCopyData(connection, &receiveBuffer, asynchronous);
-        }
-        finishedReading = true;
-
-        /* we now check the last received length returned by copy data */
-        if (receiveLength == 0) {
-            /* we cannot read more data without blocking */
-            cout << "Received 0" << endl;
-        } else if (receiveLength == -1) {
-            /* received copy done message */
-            PGresult *result = PQgetResult(connection);
-            ExecStatusType resultStatus = PQresultStatus(result);
-
-            if (resultStatus == PGRES_COMMAND_OK) {
-                cout << "Copy finished " << endl;
-            } else {
-                cout << "Copy failed" << endl;
-            }
-
-            PQclear(result);
-        } else if (receiveLength == -2) {
-            /* received an error */
-            cout << "Copy failed bc -2" << endl;
-        }
-
-        /* if copy out completed, make sure we drain all results from libpq */
-        if (receiveLength < 0) {
-            PGresult *result = PQgetResult(connection);
-            while (result != NULL) {
-                PQclear(result);
-                result = PQgetResult(connection);
-            }
         }
     }
 
+    PQfinish(conn);
+    return totalCnt;
+}
+
+int PGReader::read_pq_copy() {
+    int totalCnt = 0;
+    spdlog::get("XDBC.SERVER")->info("Using pglib with COPY, parallelism: {0}", xdbcEnv->parallelism);
+    spdlog::get("XDBC.SERVER")->info("Using compression: {0}", xdbcEnv->compression_algorithm);
+
+    int threadWrittenTuples[xdbcEnv->parallelism];
+    int threadWrittenBuffers[xdbcEnv->parallelism];
+    thread threads[xdbcEnv->parallelism];
+
+    // TODO: throw something when table does not exist
+
+    //cout << "deciding partitioning" << endl;
+    int maxCtId = getMaxCtId(tableName);
+
+    //cout << "partitioning upper bound: " << maxCtId << endl;
+    div_t div1 = div(maxCtId, xdbcEnv->parallelism);
+    int partSize = div1.quot;
+    if (div1.rem > 0)
+        partSize += 1;
+
+    //cout << "starting threads" << endl;
+    for (int i = 0; i < xdbcEnv->parallelism; i++) {
+
+        int startOff = i * partSize;
+        long endOff = ((i + 1) * partSize);
+
+        if (i == xdbcEnv->parallelism - 1)
+            endOff = UINT32_MAX;
+
+        threads[i] = std::thread(&PGReader::pqWriteToBp,
+                                 this, i, startOff, endOff,
+                                 std::ref(threadWrittenTuples[i]), std::ref(threadWrittenBuffers[i])
+        );
+        threadWrittenTuples[i] = 0;
+        threadWrittenBuffers[i] = 0;
+
+    }
+
+    //cout << "Read threads spawned" << endl;
+
+    int total = 0;
+    for (int i = 0; i < xdbcEnv->parallelism; i++) {
+        threads[i].join();
+
+        total += threadWrittenTuples[i];
+    }
+    finishedReading = true;
+    totalCnt += total;
+
+    return totalCnt;
+}
+
+void PGReader::readData(const std::string &tableName, int x) {
+    auto start = std::chrono::steady_clock::now();
+    int totalCnt = 0;
+
+    if (x == 1)
+        totalCnt = read_pqxx_stream();
+
+    if (x == 2)
+        totalCnt = read_pq_exec();
+
+    if (x == 3)
+        totalCnt = read_pq_copy();
 
     auto end = std::chrono::steady_clock::now();
     spdlog::get("XDBC.SERVER")->info("Read  | Elapsed time: {0} ms for #tuples: {1}",
                                      std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(),
-                                     totalCnt);
+                                     totalCnt
+
+    );
 
 //return 0;
 }

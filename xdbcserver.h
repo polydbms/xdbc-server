@@ -9,7 +9,7 @@
 #include <utility>
 #include <atomic>
 
-#include "DataSources/PGReader.h"
+#include "DataSources/PGReader/PGReader.h"
 
 //TODO: deprecate constants as they are declared now in xdbcEnv
 //#define TOTAL_TUPLES 10000000

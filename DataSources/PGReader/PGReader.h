@@ -50,6 +50,12 @@ public:
 
     PGReader(std::string connectionString, RuntimeEnv &xdbcEnv, std::string tableName);
 
+    int read_pqxx_stream();
+
+    int read_pq_exec();
+
+    int read_pq_copy();
+
     void readData(const std::string &tableName, int method);
 
     int pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
