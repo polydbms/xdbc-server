@@ -397,42 +397,8 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
     while (receiveLength > 0) {
 
         //cout << "Thread: " << thr << " pg rcv len = " << receiveLength << endl;
-        int l03[4];
-        double l47[4];
-
-        char *startPtr = receiveBuffer;
-
-        for (int i = 0; i < 7; i++) {
-
-            endPtr = strchr(startPtr, '|');
-            len = endPtr - startPtr;
-            char tmp[len + 1];
-            memcpy(tmp, startPtr, len);
-            tmp[len] = '\0';
-            //l0 = stoi(tmp);
-            startPtr = endPtr + 1;
-            if (i < 4) {
-                l03[i] = stoi(tmp);
-
-            } else {
-                l47[i - 4] = stod(tmp);
-
-            }
-
-        }
-        endPtr = strchr(startPtr, '\0');
-        len = endPtr - startPtr;
-        char tmp[len + 1];
-        memcpy(tmp, startPtr, len);
-        tmp[len] = '\0';
-
-
-        l47[3] = stod(tmp);
-
 
         int sleepCtr = 0;
-
-
         while (flagArr[curBid] == 0) {
             curBid++;
             if (curBid == maxBId) {
@@ -451,55 +417,71 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
             sleepCtr++;
         }
 
-        //spdlog::get("XDBC.SERVER")->info("writing to {0},{1}: ", curBid, bufferTupleId);
+        char *startPtr = receiveBuffer;
+        int mv = 0;
 
-        //TODO: fix dynamic schema
+        if (xdbcEnv->iformat == 1)
+            mv = bufferTupleId * (xdbcEnv->tuple_size);
+        else if (xdbcEnv->iformat == 2)
+            mv = bufferTupleId * 4;
+
+        for (int i = 0; i < 7; i++) {
+
+            endPtr = strchr(startPtr, '|');
+            len = endPtr - startPtr;
+            char tmp[len + 1];
+            memcpy(tmp, startPtr, len);
+            tmp[len] = '\0';
+            //l0 = stoi(tmp);
+            startPtr = endPtr + 1;
+
+            int celli = -1;
+            double celld = -1;
+
+            //TODO: introduce dynamic schema
+            //for now int, int, int, int, double, double, double, double
+            if (i < 4) {
+                celli = stoi(tmp);
+                if (xdbcEnv->iformat == 1) {
+                    memcpy(bp[curBid].data() + mv, &celli, 4);
+                    mv += 4;
+                } else if (xdbcEnv->iformat == 2) {
+                    memcpy(bp[curBid].data() + mv, &celli, 4);
+                    mv += xdbcEnv->buffer_size * 4;
+                }
+
+            } else {
+                celld = stod(tmp);
+
+                if (xdbcEnv->iformat == 1) {
+                    memcpy(bp[curBid].data() + mv, &celld, 8);
+                    mv += 8;
+                } else if (xdbcEnv->iformat == 2) {
+                    memcpy(bp[curBid].data() + mv, &celld, 8);
+                    mv += xdbcEnv->buffer_size * 8;
+                }
+            }
+
+        }
+
+        //handle last element after |
+        endPtr = strchr(startPtr, '\0');
+        len = endPtr - startPtr;
+        char tmp[len + 1];
+        memcpy(tmp, startPtr, len);
+        tmp[len] = '\0';
+
+        double last = stod(tmp);
         if (xdbcEnv->iformat == 1) {
-            int mv = bufferTupleId * (xdbcEnv->tuple_size);
-            memcpy(bp[curBid].data() + mv, &l03[0], 4);
-            mv += 4;
-            memcpy(bp[curBid].data() + mv, &l03[1], 4);
-            mv += 4;
-            memcpy(bp[curBid].data() + mv, &l03[2], 4);
-            mv += 4;
-            memcpy(bp[curBid].data() + mv, &l03[3], 4);
-            mv += 4;
-            memcpy(bp[curBid].data() + mv, &l47[0], 8);
-            mv += 8;
-            memcpy(bp[curBid].data() + mv, &l47[1], 8);
-            mv += 8;
-            memcpy(bp[curBid].data() + mv, &l47[2], 8);
-            mv += 8;
-            memcpy(bp[curBid].data() + mv, &l47[3], 8);
-        }
-        if (xdbcEnv->iformat == 2) {
+            memcpy(bp[curBid].data() + mv, &last, 8);
 
-            int mv = bufferTupleId * 4;
-            memcpy(bp[curBid].data() + mv, &l03[0], 4);
-            mv += xdbcEnv->buffer_size * 4;
-            memcpy(bp[curBid].data() + mv, &l03[1], 4);
-            mv += xdbcEnv->buffer_size * 4;
-            memcpy(bp[curBid].data() + mv, &l03[2], 4);
-            mv += xdbcEnv->buffer_size * 4;
-            memcpy(bp[curBid].data() + mv, &l03[3], 4);
-            mv += xdbcEnv->buffer_size * 4;
-            memcpy(bp[curBid].data() + mv, &l47[0], 8);
-            mv += xdbcEnv->buffer_size * 8;
-            memcpy(bp[curBid].data() + mv, &l47[1], 8);
-            mv += xdbcEnv->buffer_size * 8;
-            memcpy(bp[curBid].data() + mv, &l47[2], 8);
-            mv += xdbcEnv->buffer_size * 8;
-            memcpy(bp[curBid].data() + mv, &l47[3], 8);
+        } else if (xdbcEnv->iformat == 2) {
+            memcpy(bp[curBid].data() + mv, &last, 8);
+
         }
+
+        //spdlog::get("XDBC.SERVER")->info("writing to {0},{1}: ", curBid, bufferTupleId);
         //spdlog::get("XDBC.SERVER")->info("Thread {0} wrote tuple: {1}", thr, totalThreadWrittenTuples);
-
-        /*bp[curBid][bufferTupleId] = {l03[0], l03[1], l03[2], l03[3],
-                                     l47[0], l47[1], l47[2], l47[3]};*/
-
-        /*if (totalThreadWrittenBuffers == 0 && bufferTupleId == 0) {
-            spdlog::get("XDBC.SERVER")->warn("tuple in thread {0}, tuple: [{1}]",
-                                             thr, slStr(&bp[curBid][bufferTupleId]));
-        }*/
 
         totalThreadWrittenTuples++;
         bufferTupleId++;
@@ -511,7 +493,6 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
 
             totalReadBuffers.fetch_add(1);
             totalThreadWrittenBuffers++;
-
             curBid++;
 
             if (curBid == maxBId)
