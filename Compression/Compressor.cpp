@@ -4,8 +4,10 @@
 #include <snappy.h>
 #include <lzo/lzo1x.h>
 #include <lz4.h>
+#include <zlib.h>
+#include "spdlog/spdlog.h"
 
-size_t Compressor::getCompId(std::string name) {
+size_t Compressor::getCompId(const std::string &name) {
     if (name == "nocomp")
         return 0;
     if (name == "zstd")
@@ -16,11 +18,12 @@ size_t Compressor::getCompId(std::string name) {
         return 3;
     if (name == "lz4")
         return 4;
-    if (name == "zfp")
+    if (name == "zlib")
         return 5;
 
     return 0;
 }
+
 
 void Compressor::compress_zstd(boost::asio::mutable_buffer &buffer) {
     // Get the raw buffer pointer and size
@@ -88,7 +91,33 @@ void ::Compressor::compress_lz4(boost::asio::mutable_buffer &buffer) {
     buffer = boost::asio::mutable_buffer(compressed_data.data(), compressed_size);
 }
 
-void Compressor::compress_buffer(std::string method, boost::asio::mutable_buffer &buffer) {
+void Compressor::compress_zlib(boost::asio::mutable_buffer &buffer) {
+
+    std::vector<char> input_data(boost::asio::buffer_cast<char *>(buffer),
+                                 boost::asio::buffer_cast<char *>(buffer) + boost::asio::buffer_size(buffer));
+
+    std::vector<char> compressed_data;
+    uLongf compressed_size = compressBound(input_data.size());  // Get the maximum possible compressed size
+
+    compressed_data.resize(compressed_size);
+
+    int compression_level = 9;  // Compression level (0-9)
+
+    int result = compress2(reinterpret_cast<Bytef *>(compressed_data.data()), &compressed_size,
+                           reinterpret_cast<const Bytef *>(input_data.data()), input_data.size(), compression_level);
+
+    if (result == Z_OK) {
+        compressed_data.resize(compressed_size);
+
+        std::memcpy(boost::asio::buffer_cast<void *>(buffer), compressed_data.data(), compressed_data.size());
+        buffer = boost::asio::buffer(boost::asio::buffer_cast<void *>(buffer), compressed_data.size());
+    } else
+        spdlog::get("XDBC.SERVER")->warn("ZLIB: not OK, error {0} ", zError(result));
+
+}
+
+
+void Compressor::compress_buffer(const std::string &method, boost::asio::mutable_buffer &buffer) {
 
     //1 zstd
     //2 snappy
@@ -107,6 +136,7 @@ void Compressor::compress_buffer(std::string method, boost::asio::mutable_buffer
     if (method == "lz4")
         compress_lz4(buffer);
 
-
+    if (method == "zlib")
+        compress_zlib(buffer);
 }
 

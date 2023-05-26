@@ -73,7 +73,6 @@ bool XDBCServer::hasUnsent(PGReader &pgReader) {
 
 int XDBCServer::send(tcp::socket &socket, PGReader &pgReader) {
 
-
     auto start = std::chrono::steady_clock::now();
 
     int bufferId = 0;
@@ -84,7 +83,8 @@ int XDBCServer::send(tcp::socket &socket, PGReader &pgReader) {
     std::vector<boost::asio::const_buffer> sendBuffer;
 
     int loops = 0;
-    while (hasUnsent(pgReader)) {
+    bool boostError = false;
+    while (hasUnsent(pgReader) && !boostError) {
 
         while (flagArr[bufferId] == 1) {
             bufferId++;
@@ -130,6 +130,7 @@ int XDBCServer::send(tcp::socket &socket, PGReader &pgReader) {
             totalSentBytes += boost::asio::write(socket, sendBuffer);
         } catch (const boost::system::system_error &e) {
             spdlog::get("XDBC.SERVER")->error("Error writing to socket:  {0} ", e.what());
+            boostError = true;
             // Handle the error...
         }
 

@@ -18,7 +18,7 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     desc.add_options()
             ("help,h", "Produce this help message.")
             ("compression-type,c", po::value<string>()->default_value("nocomp"),
-             "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4")
+             "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4\n zlib")
             ("intermediate-format,f", po::value<int>()->default_value(1),
              "Set intermediate-format: \nDefault:\n  1 (row)\nOther:\n  2 (col)")
             ("buffer-size,b", po::value<int>()->default_value(1000),
