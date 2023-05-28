@@ -18,9 +18,9 @@ using namespace std;
 using namespace boost::asio;
 using ip::tcp;
 
-size_t compute_crc(const boost::asio::const_buffer &buffer) {
+size_t compute_crc(const void *data, size_t size) {
     boost::crc_32_type crc;
-    crc.process_bytes(boost::asio::buffer_cast<const void *>(buffer), boost::asio::buffer_size(buffer));
+    crc.process_bytes(data, size);
     return crc.checksum();
 }
 
@@ -115,7 +115,7 @@ int XDBCServer::send(int thr, PGReader &pgReader) {
     int bufferId = minBId;
     size_t totalSentBytes = 0;
     int threadSentBuffers = 0;
-    boost::asio::mutable_buffer tmpBuff;
+
     boost::asio::const_buffer tmpHeaderBuff;
     boost::asio::const_buffer tmpMsgBuff;
     std::vector<boost::asio::const_buffer> sendBuffer;
@@ -140,42 +140,54 @@ int XDBCServer::send(int thr, PGReader &pgReader) {
                     std::this_thread::sleep_for(xdbcEnv.sleep_time);
                 }
                 if (!hasUnsent(pgReader, minBId, maxBId)) {
+                    spdlog::get("XDBC.SERVER")->warn("Send thread {0} exiting", thr);
                     cont = false;
                     break;
                 }
 
             }
         }
-        //cout << "tuple cnt = " << totalCnt << endl;
 
         if (cont) {
-            tmpBuff = boost::asio::buffer(bp[bufferId], xdbcEnv.buffer_size * xdbcEnv.tuple_size);
-
-            if (xdbcEnv.compression_algorithm != "nocomp") {
-                //std::vector<boost::asio::mutable_buffer> buffers;
-                //TODO: check for errors in compression
-                Compressor::compress_buffer(xdbcEnv.compression_algorithm, tmpBuff);
-            }
-            //cout << "compressed buffer:" << buffer.size() << " ratio "<<  buffer.size()/(BUFFER_SIZE*TUPLE_SIZE)<< endl;
-
             //TODO: replace function with a hashmap or similar
-            //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4
+            //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib
             size_t compId = Compressor::getCompId(xdbcEnv.compression_algorithm);
+            size_t compressed_size = Compressor::compress_buffer(xdbcEnv.compression_algorithm, bp[bufferId].data(),
+                                                                 xdbcEnv.buffer_size * xdbcEnv.tuple_size);
+
+            if (compressed_size > xdbcEnv.buffer_size * xdbcEnv.tuple_size) {
+                spdlog::get("XDBC.SERVER")->warn("Send thread {0} compression more than buffer", thr);
+                compId = 0;
+            }
+            if (compressed_size == xdbcEnv.buffer_size * xdbcEnv.tuple_size) {
+
+                compId = 0;
+            }
+
+            if (compressed_size <= 0)
+                spdlog::get("XDBC.SERVER")->error("Send thread {0} compression:  {1}, error: ",
+                                                  thr, compId, compressed_size);
+
+            if (bufferId == 0)
+                spdlog::get("XDBC.SERVER")->info("Send thread {0}, buffer: {1}, buffSize: {2}, ratio: {3}",
+                                                 thr, bufferId, compressed_size,
+                                                 static_cast<double>(compressed_size) /
+                                                 (xdbcEnv.buffer_size * xdbcEnv.tuple_size));
 
             //TODO: create more sophisticated header with checksum etc
-            //uint16_t checksum = compute_checksum(static_cast<const uint8_t *>(tmpBuff.data()), tmpBuff.size());
 
-            std::array<size_t, 4> header{compId, tmpBuff.size(), compute_crc(tmpBuff),
+            std::array<size_t, 4> header{compId, compressed_size, compute_crc(bp[bufferId].data(), compressed_size),
                                          static_cast<size_t>(xdbcEnv.iformat)};
+
             tmpHeaderBuff = boost::asio::buffer(header);
-            tmpMsgBuff = boost::asio::buffer(tmpBuff);
+            tmpMsgBuff = boost::asio::buffer(bp[bufferId], compressed_size);
             sendBuffer = {tmpHeaderBuff, tmpMsgBuff};
 
             try {
                 totalSentBytes += boost::asio::write(socket, sendBuffer);
                 threadSentBuffers++;
                 totalSentBuffers.fetch_add(1);
-                flagArr[bufferId] = 1;
+                flagArr[bufferId].store(1);
             } catch (const boost::system::system_error &e) {
                 spdlog::get("XDBC.SERVER")->error("Error writing to socket:  {0} ", e.what());
                 boostError = true;
@@ -235,7 +247,7 @@ int XDBCServer::serve(int parallelism) {
         spdlog::get("XDBC.SERVER")->warn("Boost error while writing: ", error.message());
     }
 
-    spdlog::get("XDBC.SERVER")->info("Basesocket signaled with bytes: {0} ", bs);
+    //spdlog::get("XDBC.SERVER")->info("Basesocket signaled with bytes: {0} ", bs);
 
 
     // Join all the threads

@@ -8,6 +8,7 @@
 #include "spdlog/spdlog.h"
 
 size_t Compressor::getCompId(const std::string &name) {
+
     if (name == "nocomp")
         return 0;
     if (name == "zstd")
@@ -23,120 +24,163 @@ size_t Compressor::getCompId(const std::string &name) {
 
     return 0;
 }
+//TODO: examine in-place compression to avoid copies
+//TODO: recycle compression resources like context, temp buffer etc
 
+size_t Compressor::compress_zstd(void *data, size_t size) {
 
-void Compressor::compress_zstd(boost::asio::mutable_buffer &buffer) {
-    // Get the raw buffer pointer and size
-    char *data = boost::asio::buffer_cast<char *>(buffer);
-    size_t size = boost::asio::buffer_size(buffer);
+    // Calculate the maximum compressed size
+    size_t maxCompressedSize = ZSTD_compressBound(size);
 
-    // Compress the buffer in place
-    size_t compressed_size = ZSTD_compress(data, size, data, size, 1);
+    // Create a temporary buffer for the compressed data
+    std::vector<char> compressedBuffer(maxCompressedSize);
 
-    // Resize the buffer to the compressed size
-    buffer = boost::asio::buffer(data, compressed_size);
-}
-
-void Compressor::compress_snappy(boost::asio::mutable_buffer &buffer) {
-    char *data = boost::asio::buffer_cast<char *>(buffer);
-    size_t size = boost::asio::buffer_size(buffer);
-
-    std::vector<char> compressed_data(snappy::MaxCompressedLength(size));
-    size_t compressed_size = 0;
-
-    snappy::RawCompress(data, size, compressed_data.data(), &compressed_size);
-
-    // Copy the compressed data back into the input buffer
-    buffer = boost::asio::buffer(compressed_data.data(), compressed_size);
-}
-
-void Compressor::compress_lzo(boost::asio::mutable_buffer &buffer) {
-
-    const std::size_t size = boost::asio::buffer_size(buffer);
-
-    // Create a temporary buffer to hold the compressed data
-    std::vector<char> compressed_data(size + size / 16 + 64 + 3);
-    lzo_voidp wrkmem = (lzo_voidp)
-            malloc(LZO1X_1_MEM_COMPRESS);
     // Compress the data
-    lzo_uint compressed_size;
-    const int result = lzo1x_1_compress(
-            reinterpret_cast<const unsigned char *>(boost::asio::buffer_cast<const char *>(buffer)),
-            static_cast<lzo_uint>(size),
-            reinterpret_cast<unsigned char *>(&compressed_data[0]),
-            &compressed_size,
-            wrkmem
-    );
+    size_t compressedSize = ZSTD_compress(
+            compressedBuffer.data(), maxCompressedSize, data, size, /* compression level */ 1);
 
-    if (result != LZO_E_OK) {
-        throw std::runtime_error("lzo1x_1_compress failed");
+    // Check if compression was successful
+    if (ZSTD_isError(compressedSize)) {
+        // Compression error occurred
+        spdlog::get("XDBC.SERVER")->warn("Zstd Compression error: {0}", std::string(ZSTD_getErrorName(compressedSize)));
+        //TODO: handle error
+        return size;
     }
 
-    // Copy the compressed data back to the input buffer
-    boost::asio::buffer_copy(buffer, boost::asio::buffer(compressed_data.data(), compressed_size));
-    free(wrkmem);
+    // Copy the compressed data back to the original buffer
+    std::memcpy(data, compressedBuffer.data(), compressedSize);
+
+    return compressedSize;
 }
 
-void ::Compressor::compress_lz4(boost::asio::mutable_buffer &buffer) {
-    const char *input_data = boost::asio::buffer_cast<const char *>(buffer);
+size_t Compressor::compress_snappy(void *data, size_t size) {
+    // Calculate the maximum compressed size
+    size_t maxCompressedSize = snappy::MaxCompressedLength(size);
 
-    std::vector<char> compressed_data(buffer.size());
+    // Create a temporary buffer for the compressed data
+    std::vector<char> compressedBuffer(maxCompressedSize);
 
-    const int compressed_size = LZ4_compress_default(input_data, compressed_data.data(), buffer.size(),
-                                                     buffer.size());
-    if (compressed_size <= 0) {
-        throw std::runtime_error("LZ4 compression failed");
+    // Compress the data
+    size_t compressedSize;
+    snappy::RawCompress(static_cast<const char *>(data), size, compressedBuffer.data(), &compressedSize);
+
+    // Check if compression was successful
+    if (compressedSize > maxCompressedSize) {
+        // Compression error occurred
+        spdlog::get("XDBC.SERVER")->warn("Snappy compression  compressed size exceeds maximum size: {0}",
+                                         compressedSize);
+
+        return size;
     }
 
-    buffer = boost::asio::mutable_buffer(compressed_data.data(), compressed_size);
+    // Copy the compressed data back to the original buffer
+    std::memcpy(data, compressedBuffer.data(), compressedSize);
+
+    return compressedSize;
 }
 
-void Compressor::compress_zlib(boost::asio::mutable_buffer &buffer) {
+size_t Compressor::compress_lzo(void *data, size_t size) {
+    // Calculate the maximum compressed size
+    size_t maxCompressedSize = size + (size / 16) + 64 + 3;
 
-    std::vector<char> input_data(boost::asio::buffer_cast<char *>(buffer),
-                                 boost::asio::buffer_cast<char *>(buffer) + boost::asio::buffer_size(buffer));
+    // Create a temporary buffer for the compressed data
+    std::vector<unsigned char> compressedBuffer(maxCompressedSize);
 
-    std::vector<char> compressed_data;
-    uLongf compressed_size = compressBound(input_data.size());  // Get the maximum possible compressed size
+    // Compress the data
+    lzo_uint compressedSize;
+    lzo_voidp wrkmem = (lzo_voidp) malloc(LZO1X_1_MEM_COMPRESS);
+    lzo1x_1_compress(static_cast<const unsigned char *>(data), size, compressedBuffer.data(), &compressedSize, wrkmem);
 
-    compressed_data.resize(compressed_size);
+    // Check if compression was successful
+    if (compressedSize > maxCompressedSize) {
+        // Compression error occurred
+        spdlog::get("XDBC.SERVER")->warn("lzo compression error: compressed size exceeds maximum size: {0}/{1}",
+                                         maxCompressedSize, compressedSize);
 
-    int compression_level = 9;  // Compression level (0-9)
+        return size;
+    }
 
-    int result = compress2(reinterpret_cast<Bytef *>(compressed_data.data()), &compressed_size,
-                           reinterpret_cast<const Bytef *>(input_data.data()), input_data.size(), compression_level);
+    // Copy the compressed data back to the original buffer
+    std::memcpy(data, compressedBuffer.data(), compressedSize);
+
+    return compressedSize;
+}
+
+size_t Compressor::compress_lz4(void *data, size_t size) {
+    // Calculate the maximum compressed size
+    int maxCompressedSize = LZ4_compressBound(size);
+
+    // Create a temporary buffer for the compressed data
+    std::vector<char> compressedBuffer(maxCompressedSize);
+
+    // Compress the data
+    int compressedSize = LZ4_compress_default(static_cast<const char *>(data), compressedBuffer.data(), size,
+                                              maxCompressedSize);
+
+    // Check if compression was successful
+    if (compressedSize < 0) {
+        // Compression error occurred
+        spdlog::get("XDBC.SERVER")->warn("lz4 compression error: {0} ", compressedSize);
+        //throw std::runtime_error("Compression error: failed to compress data");
+        return size;
+    }
+
+    // Copy the compressed data back to the original buffer
+    std::memcpy(data, compressedBuffer.data(), compressedSize);
+
+    return compressedSize;
+}
+
+size_t Compressor::compress_zlib(void *data, size_t size) {
+
+    uLongf compressed_size = compressBound(size);
+
+    std::vector<Bytef> compressed_data(compressed_size);
+
+    int compression_level = 9;
+
+    int result = compress2(compressed_data.data(), &compressed_size,
+                           static_cast<const Bytef *>(data), size, compression_level);
+
+    if (compressed_size > size)
+        return size;
 
     if (result == Z_OK) {
         compressed_data.resize(compressed_size);
-
-        std::memcpy(boost::asio::buffer_cast<void *>(buffer), compressed_data.data(), compressed_data.size());
-        buffer = boost::asio::buffer(boost::asio::buffer_cast<void *>(buffer), compressed_data.size());
-    } else
+        std::memcpy(data, compressed_data.data(), compressed_size);
+    } else {
         spdlog::get("XDBC.SERVER")->warn("ZLIB: not OK, error {0} ", zError(result));
+        return size;
+    }
 
+    return compressed_size;
 }
 
 
-void Compressor::compress_buffer(const std::string &method, boost::asio::mutable_buffer &buffer) {
+size_t Compressor::compress_buffer(const std::string &method, void *data, size_t size) {
 
     //1 zstd
     //2 snappy
     //3 lzo
     //4 lz4
+    //5 zlib
 
     if (method == "zstd")
-        compress_zstd(buffer);
+        return compress_zstd(data, size);
 
     if (method == "snappy")
-        compress_snappy(buffer);
+        return compress_snappy(data, size);
 
     if (method == "lzo")
-        compress_lzo(buffer);
+        return compress_lzo(data, size);
 
     if (method == "lz4")
-        compress_lz4(buffer);
+        return compress_lz4(data, size);
 
     if (method == "zlib")
-        compress_zlib(buffer);
+        return compress_zlib(data, size);
+
+    //no method picked, not compressing
+    return size;
 }
 
