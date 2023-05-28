@@ -27,7 +27,9 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
              "Set the amount of buffers used.\nDefault: 1000")
             ("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
             ("sleep-time,s", po::value<int>()->default_value(5), "Set a sleep-time in milli seconds.\nDefault: 5ms")
-            ("parallelism,P", po::value<int>()->default_value(4), "Set the parallelism grade.\nDefault: 4");
+            ("read-parallelism,rp", po::value<int>()->default_value(4), "Set the read parallelism grade.\nDefault: 4")
+            ("network-parallelism,np", po::value<int>()->default_value(4),
+             "Set the send parallelism grade.\nDefault: 4");
 
     po::positional_options_description p;
     p.add("compression-type", 1);
@@ -72,12 +74,17 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     if (vm.count("sleep-time")) {
         cout << "Sleep-time "
              << vm["sleep-time"].as<int>() << "ms.\n";
-        env.sleep_time = vm["sleep-time"].as<int>();
+        env.sleep_time = std::chrono::milliseconds(vm["sleep-time"].as<int>());
     }
-    if (vm.count("parallelism")) {
-        cout << "Parallelism "
-             << vm["parallelism"].as<int>() << ".\n";
-        env.parallelism = vm["parallelism"].as<int>();
+    if (vm.count("read-parallelism")) {
+        cout << "Read Parallelism "
+             << vm["read-parallelism"].as<int>() << ".\n";
+        env.read_parallelism = vm["read-parallelism"].as<int>();
+    }
+    if (vm.count("network-parallelism")) {
+        cout << "Network Parallelism "
+             << vm["network-parallelism"].as<int>() << ".\n";
+        env.network_parallelism = vm["network-parallelism"].as<int>();
     }
 
     return env;
@@ -115,7 +122,7 @@ int main(int argc, char *argv[]) {
             auto console = spdlog::stdout_color_mt("XDBC.SERVER");
             XDBCServer xdbcserver = XDBCServer(xdbcEnv);
 
-            xdbcserver.serve();
+            xdbcserver.serve(xdbcEnv.network_parallelism);
             break;
         }
         case 6: {

@@ -35,7 +35,15 @@ uint16_t compute_checksum(const uint8_t *data, std::size_t size) {
 
 string read_(tcp::socket &socket) {
     boost::asio::streambuf buf;
-    boost::asio::read_until(socket, buf, "\n");
+    try {
+        size_t b = boost::asio::read_until(socket, buf, "\n");
+        //spdlog::get("XDBC.SERVER")->info("Got bytes: {0} ", b);
+    }
+    catch (const boost::system::system_error &e) {
+        spdlog::get("XDBC.SERVER")->warn("Boost error while reading: {0} ", e.what());
+    }
+
+
     string data = boost::asio::buffer_cast<const char *>(buf.data());
     return data;
 }
@@ -62,21 +70,51 @@ XDBCServer::XDBCServer(const RuntimeEnv &env)
 
 }
 
-bool XDBCServer::hasUnsent(PGReader &pgReader) {
+bool XDBCServer::hasUnsent(PGReader &pgReader, int minBid, int maxBid) {
 
-    if (pgReader.finishedReading && pgReader.totalReadBuffers == totalSentBuffers)
+    /*if (pgReader.finishedReading && totalSentBuffers == pgReader.totalReadBuffers)
+        return false;*/
+    if (pgReader.finishedReading) {
+        for (int i = minBid; i < maxBid - 1; i++) {
+            if (flagArr[i] == 0)
+                return true;
+        }
         return false;
+    }
+
     return true;
 
 }
 
 
-int XDBCServer::send(tcp::socket &socket, PGReader &pgReader) {
+int XDBCServer::send(int thr, PGReader &pgReader) {
+
+    int port = 1234 + thr + 1;
+    boost::asio::io_context ioContext;
+    boost::asio::ip::tcp::acceptor listenerAcceptor(ioContext,
+                                                    boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(),
+                                                                                   port));
+    boost::asio::ip::tcp::socket socket(ioContext);
+    listenerAcceptor.accept(socket);
+
+    spdlog::get("XDBC.SERVER")->info("Send thread {0} accepting on port: {1}", thr, port);
+    //get client
+    string readThreadId = read_(socket);
+    readThreadId.erase(std::remove(readThreadId.begin(), readThreadId.end(), '\n'), readThreadId.cend());
+
+    //decide partitioning
+    int minBId = thr * (xdbcEnv.bufferpool_size / xdbcEnv.network_parallelism);
+    int maxBId = (thr + 1) * (xdbcEnv.bufferpool_size / xdbcEnv.network_parallelism);
+
+    spdlog::get("XDBC.SERVER")->info(
+            "Send thread {0} paired with Client read thread {1} assigned buffers [{2},{3}]",
+            thr, readThreadId, minBId, maxBId);
 
     auto start = std::chrono::steady_clock::now();
 
-    int bufferId = 0;
+    int bufferId = minBId;
     size_t totalSentBytes = 0;
+    int threadSentBuffers = 0;
     boost::asio::mutable_buffer tmpBuff;
     boost::asio::const_buffer tmpHeaderBuff;
     boost::asio::const_buffer tmpMsgBuff;
@@ -84,107 +122,131 @@ int XDBCServer::send(tcp::socket &socket, PGReader &pgReader) {
 
     int loops = 0;
     bool boostError = false;
-    while (hasUnsent(pgReader) && !boostError) {
+    bool cont = true;
+    while (hasUnsent(pgReader, minBId, maxBId) && !boostError && cont) {
 
         while (flagArr[bufferId] == 1) {
             bufferId++;
-            if (bufferId == xdbcEnv.bufferpool_size) {
-                bufferId = 0;
+            if (bufferId == maxBId) {
+                bufferId = minBId;
 
                 loops++;
                 if (loops == 1000000) {
                     loops = 0;
-                    spdlog::get("XDBC.SERVER")->warn("Server: stuck in send, totalSent: {0}, totalRead {1},",
-                                                     totalSentBuffers, pgReader.totalReadBuffers);
+                    spdlog::get("XDBC.SERVER")->warn(
+                            "Send thread {0} stuck in send at buffer: {1}, sentBuffs: ({2}/{3}), totalReadBuffs: {4} ",
+                            thr, bufferId, threadSentBuffers, totalSentBuffers, pgReader.totalReadBuffers);
 
-                    std::this_thread::sleep_for(SLEEP_TIME);
-
+                    std::this_thread::sleep_for(xdbcEnv.sleep_time);
                 }
+                if (!hasUnsent(pgReader, minBId, maxBId)) {
+                    cont = false;
+                    break;
+                }
+
             }
         }
         //cout << "tuple cnt = " << totalCnt << endl;
 
-        tmpBuff = boost::asio::buffer(bp[bufferId], xdbcEnv.buffer_size * xdbcEnv.tuple_size);
+        if (cont) {
+            tmpBuff = boost::asio::buffer(bp[bufferId], xdbcEnv.buffer_size * xdbcEnv.tuple_size);
 
-        if (xdbcEnv.compression_algorithm != "nocomp") {
-            //std::vector<boost::asio::mutable_buffer> buffers;
-            //TODO: check for errors in compression
-            Compressor::compress_buffer(xdbcEnv.compression_algorithm, tmpBuff);
+            if (xdbcEnv.compression_algorithm != "nocomp") {
+                //std::vector<boost::asio::mutable_buffer> buffers;
+                //TODO: check for errors in compression
+                Compressor::compress_buffer(xdbcEnv.compression_algorithm, tmpBuff);
+            }
+            //cout << "compressed buffer:" << buffer.size() << " ratio "<<  buffer.size()/(BUFFER_SIZE*TUPLE_SIZE)<< endl;
+
+            //TODO: replace function with a hashmap or similar
+            //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4
+            size_t compId = Compressor::getCompId(xdbcEnv.compression_algorithm);
+
+            //TODO: create more sophisticated header with checksum etc
+            //uint16_t checksum = compute_checksum(static_cast<const uint8_t *>(tmpBuff.data()), tmpBuff.size());
+
+            std::array<size_t, 4> header{compId, tmpBuff.size(), compute_crc(tmpBuff),
+                                         static_cast<size_t>(xdbcEnv.iformat)};
+            tmpHeaderBuff = boost::asio::buffer(header);
+            tmpMsgBuff = boost::asio::buffer(tmpBuff);
+            sendBuffer = {tmpHeaderBuff, tmpMsgBuff};
+
+            try {
+                totalSentBytes += boost::asio::write(socket, sendBuffer);
+                threadSentBuffers++;
+                totalSentBuffers.fetch_add(1);
+                flagArr[bufferId] = 1;
+            } catch (const boost::system::system_error &e) {
+                spdlog::get("XDBC.SERVER")->error("Error writing to socket:  {0} ", e.what());
+                boostError = true;
+                // Handle the error...
+            }
         }
-        //cout << "compressed buffer:" << buffer.size() << " ratio "<<  buffer.size()/(BUFFER_SIZE*TUPLE_SIZE)<< endl;
-
-        //TODO: replace function with a hashmap or similar
-        //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4
-        size_t compId = Compressor::getCompId(xdbcEnv.compression_algorithm);
-
-        //TODO: create more sophisticated header with checksum etc
-        //uint16_t checksum = compute_checksum(static_cast<const uint8_t *>(tmpBuff.data()), tmpBuff.size());
-
-        std::array<size_t, 4> header{compId, tmpBuff.size(), compute_crc(tmpBuff),
-                                     static_cast<size_t>(xdbcEnv.iformat)};
-        tmpHeaderBuff = boost::asio::buffer(header);
-        tmpMsgBuff = boost::asio::buffer(tmpBuff);
-        sendBuffer = {tmpHeaderBuff, tmpMsgBuff};
-
-        try {
-            totalSentBytes += boost::asio::write(socket, sendBuffer);
-        } catch (const boost::system::system_error &e) {
-            spdlog::get("XDBC.SERVER")->error("Error writing to socket:  {0} ", e.what());
-            boostError = true;
-            // Handle the error...
-        }
-
-        //cout << "Sent bytes:" << bytes_sent << endl;
-        totalSentBuffers.fetch_add(1);
-        //cout << "sent buffer " << bufferId << endl;
-        flagArr[bufferId] = 1;
-        //totalSentBytes += bp[bufferId].size();
-
-        //totalSent += BUFFER_SIZE;
-        /*for (int i = 0; i < BUFFERPOOL_SIZE; i++)
-            cout << flagArr[i];
-        cout << endl;*/
-
     }
 
+    auto end = std::chrono::steady_clock::now();
+    spdlog::get("XDBC.SERVER")->info("Send thread {0} finished. Elapsed time: {1} ms, bytes {2}, #buffers {3} ",
+                                     thr, std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(),
+                                     totalSentBytes, threadSentBuffers);
 
     socket.close();
 
-    auto end = std::chrono::steady_clock::now();
-    spdlog::get("XDBC.SERVER")->info("Send  | Elapsed time: {0} ms, bytes {1}, #buffers {2} ",
-                                     std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(),
-                                     totalSentBytes, totalSentBuffers);
     return 1;
 }
 
 
-int XDBCServer::serve() {
+int XDBCServer::serve(int parallelism) {
 
-    boost::asio::io_service io_service;
-    //listen for new connection
-    tcp::acceptor acceptor_(io_service, tcp::endpoint(tcp::v4(), 1234));
-    //socket creation
-    tcp::socket socket_(io_service);
-    //waiting for connection
-    acceptor_.accept(socket_);
+
+    boost::asio::io_context ioContext;
+    boost::asio::ip::tcp::acceptor acceptor(ioContext,
+                                            boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 1234));
+    boost::asio::ip::tcp::socket baseSocket(ioContext);
+    acceptor.accept(baseSocket);
+
     //read operation
-    tableName = read_(socket_);
+    tableName = read_(baseSocket);
 
     tableName.erase(std::remove(tableName.begin(), tableName.end(), '\n'), tableName.cend());
 
-    spdlog::get("XDBC.SERVER")->info("Read table {0} ", tableName);
+    spdlog::get("XDBC.SERVER")->info("Client wants to read table {0} ", tableName);
 
     PGReader pgReader("", xdbcEnv, tableName);
 
     std::thread t1(&PGReader::readData, &pgReader, tableName, 3);
+
+    spdlog::get("XDBC.SERVER")->info("Created PG read threads");
+
     while (pgReader.totalReadBuffers == 0) {
-        std::this_thread::sleep_for(SLEEP_TIME);
+        std::this_thread::sleep_for(xdbcEnv.sleep_time);
     }
 
-    std::thread t2(&XDBCServer::send, this, std::ref(socket_), std::ref(pgReader));
+    std::vector<thread> threads(parallelism);
+    for (int i = 0; i < parallelism; i++) {
+        threads[i] = std::thread(&XDBCServer::send, this, i, std::ref(pgReader));
+    }
+
+    spdlog::get("XDBC.SERVER")->info("Created send threads: {0} ", parallelism);
+
+    const std::string msg = "Server ready\n";
+    boost::system::error_code error;
+    size_t bs = boost::asio::write(baseSocket, boost::asio::buffer(msg), error);
+    if (error) {
+        spdlog::get("XDBC.SERVER")->warn("Boost error while writing: ", error.message());
+    }
+
+    spdlog::get("XDBC.SERVER")->info("Basesocket signaled with bytes: {0} ", bs);
+
+
+    // Join all the threads
+    for (auto &thread: threads) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
 
     t1.join();
-    t2.join();
+    baseSocket.close();
 
     return 1;
 }

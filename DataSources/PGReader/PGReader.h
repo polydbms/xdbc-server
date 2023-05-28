@@ -5,11 +5,12 @@
 #include <vector>
 #include <array>
 #include <atomic>
+#include <chrono>
 
 //#define BUFFER_SIZE 1000
 //#define BUFFERPOOL_SIZE 1000
 //#define TUPLE_SIZE 48
-#define SLEEP_TIME 5ms
+//#define SLEEP_TIME 5ms
 
 struct shortLineitem {
     int l_orderkey;
@@ -39,8 +40,9 @@ struct RuntimeEnv {
     int buffer_size;
     int bufferpool_size;
     int tuple_size;
-    int sleep_time;
-    int parallelism;
+    std::chrono::milliseconds sleep_time;
+    int read_parallelism;
+    int network_parallelism;
     std::vector<std::atomic<int>> *flagArrPtr;
     std::vector<std::vector<std::byte>> *bpPtr;
 };

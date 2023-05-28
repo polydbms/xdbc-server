@@ -17,7 +17,7 @@
 //#define BUFFERPOOL_SIZE 1000
 //#define TUPLE_SIZE 48
 //#define PARALLELISM 4
-#define SLEEP_TIME 5ms
+//#define SLEEP_TIME 2ms
 
 
 using namespace boost::asio;
@@ -28,11 +28,11 @@ class XDBCServer {
 public:
     explicit XDBCServer(const RuntimeEnv &env);
 
-    int serve();
+    int serve(int parallelism);
 
-    int send(ip::tcp::socket &socket, PGReader &pgReader);
+    int send(int threadno, PGReader &pgReader);
 
-    bool hasUnsent(PGReader &pgReader);
+    bool hasUnsent(PGReader &pgReader, int minBid, int maxBid);
 
 private:
     RuntimeEnv xdbcEnv;
