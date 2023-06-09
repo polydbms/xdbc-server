@@ -20,7 +20,6 @@ RUN apt install -qy libzstd-dev liblzo2-dev liblz4-dev libsnappy-dev libbrotli-d
 
 RUN git clone https://github.com/LLNL/zfp.git && cd zfp && make
 
-
 # install postgres dependencies
 
 RUN apt install -qy libpq-dev libpqxx-dev
@@ -42,7 +41,10 @@ RUN cd /clickhouse-cpp && rm -rf build && mkdir build && cd build && cmake .. -D
 # copy and install xdbc server
 RUN mkdir /xdbc-server
 
-COPY * /xdbc-server/
+ADD * /xdbc-server/
+ADD Compression /xdbc-server/Compression
+ADD DataSources /xdbc-server/DataSources
+RUN ls /xdbc-server
 
 RUN rm -rf /xdbc-server/build && mkdir /xdbc-server/build && cd /xdbc-server/build && cmake .. && make -j8
 

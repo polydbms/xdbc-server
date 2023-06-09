@@ -1,5 +1,5 @@
-#ifndef PG_READER_H
-#define PG_READER_H
+#ifndef CH_READER_H
+#define CH_READER_H
 
 #include <string>
 #include <vector>
@@ -8,28 +8,21 @@
 #include <chrono>
 #include "../DataSource.h"
 
-class PGReader : public DataSource {
+class CHReader : public DataSource {
 public:
 
-    PGReader(RuntimeEnv &xdbcEnv, const std::string &tableName);
+    CHReader(RuntimeEnv &xdbcEnv, const std::string tableName);
 
     int getTotalReadBuffers() const override;
 
     bool getFinishedReading() const override;
 
-    void readData() override;
+    void readData();
 
 private:
+    int chWriteToBp(int thr, int from, long to, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
 
-    int pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
-
-    int read_pqxx_stream();
-
-    int read_pq_exec();
-
-    int read_pq_copy();
-
-    static int getMaxCtId(const std::string &tableName);
+    static int getMaxRowNum(const std::string &tableName);
 
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;
@@ -39,4 +32,4 @@ private:
     std::string tableName;
 };
 
-#endif // PG_READER_H
+#endif // CH_READER_H

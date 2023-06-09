@@ -17,6 +17,8 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     po::options_description desc("Usage: ./xdbc-server [options]\n\nAllowed options");
     desc.add_options()
             ("help,h", "Produce this help message.")
+            ("system,y", po::value<string>()->default_value("postgres"),
+             "Set system: \nDefault:\n  postgres\nOther:\n  clickhouse")
             ("compression-type,c", po::value<string>()->default_value("nocomp"),
              "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4\n zlib")
             ("intermediate-format,f", po::value<int>()->default_value(1),
@@ -44,6 +46,12 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     }
 
     RuntimeEnv env;
+
+    if (vm.count("system")) {
+        cout << "System "
+             << vm["system"].as<string>() << ".\n";
+        env.system = vm["system"].as<string>();
+    }
 
     if (vm.count("intermediate-format")) {
         cout << "Intermediate format "

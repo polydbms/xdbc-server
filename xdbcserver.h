@@ -30,9 +30,9 @@ public:
 
     int serve(int parallelism);
 
-    int send(int threadno, PGReader &pgReader);
+    int send(int threadno, DataSource &dataReader);
 
-    bool hasUnsent(PGReader &pgReader, int minBid, int maxBid);
+    bool hasUnsent(DataSource &dataReader, int minBid, int maxBid);
 
 private:
     RuntimeEnv xdbcEnv;

@@ -1,5 +1,4 @@
 #include <chrono>
-#include <iostream>
 #include "xdbcserver.h"
 
 #include <boost/asio.hpp>
@@ -11,6 +10,7 @@
 
 #include "Compression/Compressor.h"
 #include "DataSources/PGReader/PGReader.h"
+#include "DataSources/CHReader/CHReader.h"
 #include "spdlog/spdlog.h"
 
 
@@ -70,11 +70,11 @@ XDBCServer::XDBCServer(const RuntimeEnv &env)
 
 }
 
-bool XDBCServer::hasUnsent(PGReader &pgReader, int minBid, int maxBid) {
+bool XDBCServer::hasUnsent(DataSource &dataReader, int minBid, int maxBid) {
 
     /*if (pgReader.finishedReading && totalSentBuffers == pgReader.totalReadBuffers)
         return false;*/
-    if (pgReader.finishedReading) {
+    if (dataReader.getFinishedReading()) {
         for (int i = minBid; i < maxBid - 1; i++) {
             if (flagArr[i] == 0)
                 return true;
@@ -87,7 +87,7 @@ bool XDBCServer::hasUnsent(PGReader &pgReader, int minBid, int maxBid) {
 }
 
 
-int XDBCServer::send(int thr, PGReader &pgReader) {
+int XDBCServer::send(int thr, DataSource &dataReader) {
 
     int port = 1234 + thr + 1;
     boost::asio::io_context ioContext;
@@ -123,7 +123,7 @@ int XDBCServer::send(int thr, PGReader &pgReader) {
     int loops = 0;
     bool boostError = false;
     bool cont = true;
-    while (hasUnsent(pgReader, minBId, maxBId) && !boostError && cont) {
+    while (hasUnsent(dataReader, minBId, maxBId) && !boostError && cont) {
 
         while (flagArr[bufferId] == 1) {
             bufferId++;
@@ -135,11 +135,11 @@ int XDBCServer::send(int thr, PGReader &pgReader) {
                     loops = 0;
                     spdlog::get("XDBC.SERVER")->warn(
                             "Send thread {0} stuck in send at buffer: {1}, sentBuffs: ({2}/{3}), totalReadBuffs: {4} ",
-                            thr, bufferId, threadSentBuffers, totalSentBuffers, pgReader.totalReadBuffers);
+                            thr, bufferId, threadSentBuffers, totalSentBuffers, dataReader.getTotalReadBuffers());
 
                     std::this_thread::sleep_for(xdbcEnv.sleep_time);
                 }
-                if (!hasUnsent(pgReader, minBId, maxBId)) {
+                if (!hasUnsent(dataReader, minBId, maxBId)) {
                     spdlog::get("XDBC.SERVER")->warn("Send thread {0} exiting", thr);
                     cont = false;
                     break;
@@ -160,7 +160,6 @@ int XDBCServer::send(int thr, PGReader &pgReader) {
                 compId = 0;
             }
             if (compressed_size == xdbcEnv.buffer_size * xdbcEnv.tuple_size) {
-
                 compId = 0;
             }
 
@@ -223,20 +222,30 @@ int XDBCServer::serve(int parallelism) {
 
     spdlog::get("XDBC.SERVER")->info("Client wants to read table {0} ", tableName);
 
-    PGReader pgReader("", xdbcEnv, tableName);
+    std::vector<thread> threads(parallelism);
+    std::thread t1;
+    std::unique_ptr<DataSource> ds;
 
-    std::thread t1(&PGReader::readData, &pgReader, tableName, 3);
+    if (xdbcEnv.system == "postgres") {
+        ds = std::make_unique<PGReader>(xdbcEnv, tableName);
+    } else if (xdbcEnv.system == "clickhouse") {
+        ds = std::make_unique<CHReader>(xdbcEnv, tableName);
+    }
 
-    spdlog::get("XDBC.SERVER")->info("Created PG read threads");
+    t1 = std::thread([&ds]() {
+        ds->readData();
+    });
 
-    while (pgReader.totalReadBuffers == 0) {
+    spdlog::get("XDBC.SERVER")->info("Created {0} read threads", xdbcEnv.system);
+
+    while (ds->getTotalReadBuffers() == 0) {
         std::this_thread::sleep_for(xdbcEnv.sleep_time);
     }
 
-    std::vector<thread> threads(parallelism);
     for (int i = 0; i < parallelism; i++) {
-        threads[i] = std::thread(&XDBCServer::send, this, i, std::ref(pgReader));
+        threads[i] = std::thread(&XDBCServer::send, this, i, std::ref(*ds));
     }
+
 
     spdlog::get("XDBC.SERVER")->info("Created send threads: {0} ", parallelism);
 

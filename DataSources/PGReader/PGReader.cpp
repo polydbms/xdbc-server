@@ -2,7 +2,6 @@
 #include "/usr/include/postgresql/libpq-fe.h"
 #include <pqxx/pqxx>
 #include <boost/asio.hpp>
-#include <boost/bind/bind.hpp>
 #include <iostream>
 #include <atomic>
 #include <chrono>
@@ -14,31 +13,27 @@ using namespace pqxx;
 using namespace boost::asio;
 using ip::tcp;
 
-void PGReader::printSl(shortLineitem *t) {
-    cout << t->l_orderkey << " | "
-         << t->l_partkey << " | "
-         << t->l_suppkey << " | "
-         << t->l_linenumber << " | "
-         << t->l_quantity << " | "
-         << t->l_extendedprice << " | "
-         << t->l_discount << " | "
-         << t->l_tax
-         << endl;
-}
 
-PGReader::PGReader(std::string connectionString,
-                   RuntimeEnv &xdbcEnv,
-                   std::string tableName) : _connectionString(connectionString),
-                                            flagArr(*xdbcEnv.flagArrPtr),
-                                            bp(*xdbcEnv.bpPtr),
-                                            totalReadBuffers(0),
-                                            finishedReading(false),
-                                            xdbcEnv(&xdbcEnv),
-                                            tableName(tableName) {
+PGReader::PGReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
+        DataSource(xdbcEnv, tableName),
+        flagArr(*xdbcEnv.flagArrPtr),
+        bp(*xdbcEnv.bpPtr),
+        totalReadBuffers(0),
+        finishedReading(false),
+        xdbcEnv(&xdbcEnv),
+        tableName(tableName) {
 
 }
 
-int PGReader::getMaxCtId(std::string tableName) {
+int PGReader::getTotalReadBuffers() const {
+    return totalReadBuffers;
+}
+
+bool PGReader::getFinishedReading() const {
+    return finishedReading;
+}
+
+int PGReader::getMaxCtId(const std::string &tableName) {
 
     const char *conninfo;
     PGconn *connection = NULL;
@@ -272,6 +267,7 @@ int PGReader::read_pq_exec() {
 }
 
 int PGReader::read_pq_copy() {
+
     int totalCnt = 0;
     spdlog::get("XDBC.SERVER")->info("Using pglib with COPY, parallelism: {0}", xdbcEnv->read_parallelism);
     spdlog::get("XDBC.SERVER")->info("Using compression: {0}", xdbcEnv->compression_algorithm);
@@ -282,7 +278,6 @@ int PGReader::read_pq_copy() {
 
     // TODO: throw something when table does not exist
 
-    //cout << "deciding partitioning" << endl;
     int maxCtId = getMaxCtId(tableName);
 
     //cout << "partitioning upper bound: " << maxCtId << endl;
@@ -323,7 +318,10 @@ int PGReader::read_pq_copy() {
     return totalCnt;
 }
 
-void PGReader::readData(const std::string &tableName, int x) {
+void PGReader::readData() {
+
+    //TODO: expose different read methods
+    int x = 3;
     auto start = std::chrono::steady_clock::now();
     int totalCnt = 0;
 
@@ -343,7 +341,7 @@ void PGReader::readData(const std::string &tableName, int x) {
 
     );
 
-//return 0;
+    //return 0;
 }
 
 int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers) {
@@ -361,7 +359,7 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
     const int asynchronous = 0;
     PGresult *res;
 
-    int bufferTupleId;
+    int bufferTupleId = 0;
 
     // TODO: attention! `hostAddr` is for IPs while `host` is for hostnames, handle correctly
     conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
@@ -374,7 +372,7 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
             "COPY (SELECT * FROM " + tableName + " WHERE ctid BETWEEN '(" + std::to_string(from) + ",0)'::tid AND '(" +
             std::to_string(to) + ",0)'::tid) TO STDOUT WITH (FORMAT text, DELIMITER '|')";
 
-    spdlog::get("XDBC.SERVER")->info("Thread {0} runs query: {1}", thr, qStr);
+    spdlog::get("XDBC.SERVER")->info("PG thread {0} runs query: {1}", thr, qStr);
 
     res = PQexec(connection, qStr.c_str());
     ExecStatusType resType = PQresultStatus(res);
@@ -393,7 +391,6 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
     //cout << "Thread: " << thr << " pg rcv len = " << receiveLength << endl;
 
 
-
     while (receiveLength > 0) {
 
         //cout << "Thread: " << thr << " pg rcv len = " << receiveLength << endl;
@@ -403,7 +400,6 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
             curBid++;
             if (curBid == maxBId) {
                 curBid = minBId;
-                //cout << "Thread " << thr << " restarted to buffer id " << bufferId << endl;
             }
 
             if (sleepCtr == 1000) {
@@ -425,6 +421,9 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
         else if (xdbcEnv->iformat == 2)
             mv = bufferTupleId * 4;
 
+        // TODO: introduce dynamic schema
+        //for now int, int, int, int, double, double, double, double
+
         for (int i = 0; i < 7; i++) {
 
             endPtr = strchr(startPtr, '|');
@@ -438,8 +437,6 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
             int celli = -1;
             double celld = -1;
 
-            //TODO: introduce dynamic schema
-            //for now int, int, int, int, double, double, double, double
             if (i < 4) {
                 celli = stoi(tmp);
                 if (xdbcEnv->iformat == 1) {
@@ -472,11 +469,7 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
         tmp[len] = '\0';
 
         double last = stod(tmp);
-        if (xdbcEnv->iformat == 1) {
-            memcpy(bp[curBid].data() + mv, &last, 8);
-        } else if (xdbcEnv->iformat == 2) {
-            memcpy(bp[curBid].data() + mv, &last, 8);
-        }
+        memcpy(bp[curBid].data() + mv, &last, 8);
 
         //spdlog::get("XDBC.SERVER")->info("writing to {0},{1}: ", curBid, bufferTupleId);
         //spdlog::get("XDBC.SERVER")->info("Thread {0} wrote tuple: {1}", thr, totalThreadWrittenTuples);
@@ -600,35 +593,5 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
                                      thr, totalThreadWrittenBuffers, totalThreadWrittenTuples);
 
     return 1;
-}
-
-std::string PGReader::slStr(shortLineitem *t) {
-
-    return std::to_string(t->l_orderkey) + std::string(", ") +
-           std::to_string(t->l_partkey) + std::string(", ") +
-           std::to_string(t->l_suppkey) + std::string(", ") +
-           std::to_string(t->l_linenumber) + std::string(", ") +
-           std::to_string(t->l_quantity) + std::string(", ") +
-           std::to_string(t->l_extendedprice) + std::string(", ") +
-           std::to_string(t->l_discount) + std::string(", ") +
-           std::to_string(t->l_tax);
-}
-
-double double_swap(double d) {
-    union {
-        double d;
-        unsigned char bytes[8];
-    } src, dest;
-
-    src.d = d;
-    dest.bytes[0] = src.bytes[7];
-    dest.bytes[1] = src.bytes[6];
-    dest.bytes[2] = src.bytes[5];
-    dest.bytes[3] = src.bytes[4];
-    dest.bytes[4] = src.bytes[3];
-    dest.bytes[5] = src.bytes[2];
-    dest.bytes[6] = src.bytes[1];
-    dest.bytes[7] = src.bytes[0];
-    return dest.d;
 }
 
