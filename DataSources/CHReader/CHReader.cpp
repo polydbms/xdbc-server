@@ -21,7 +21,18 @@ CHReader::CHReader(RuntimeEnv &xdbcEnv, const std::string tableName) :
         totalReadBuffers(0),
         finishedReading(false),
         xdbcEnv(&xdbcEnv),
-        tableName(tableName) {
+        tableName(tableName),
+        schema() {
+
+    // TODO: move schema creation somewhere else
+    schema.emplace_back("l_orderkey", "INT", 4);
+    schema.emplace_back("l_partkey", "INT", 4);
+    schema.emplace_back("l_suppkey", "INT", 4);
+    schema.emplace_back("l_linenumber", "INT", 4);
+    schema.emplace_back("l_quantity", "DOUBLE", 8);
+    schema.emplace_back("l_extendedprice", "DOUBLE", 8);
+    schema.emplace_back("l_discount", "DOUBLE", 8);
+    schema.emplace_back("l_tax", "DOUBLE", 8);
 
 }
 
@@ -103,11 +114,12 @@ int CHReader::chWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
     //TODO: fix dynamic schema
     //TODO: fix clickhouse partitioning
     std::string qStr =
-            "SELECT l_orderkey,l_partkey,l_suppkey,l_linenumber,l_quantity,l_extendedprice,l_discount,l_tax"
+            "SELECT " + getAttributesAsStr(schema) +
             " FROM (SELECT rowNumberInAllBlocks() as row_no,* FROM " + tableName +
             " ORDER BY l_orderkey, l_partkey, l_suppkey)" +
             " WHERE row_no >= " + to_string(from) + " AND row_no < " + to_string(to);
 
+    spdlog::get("XDBC.SERVER")->info("CH thread {0} runs query: {1}", thr, qStr);
     /*std::string qStr = "SELECT rowNumberInAllBlocks() as row_no,* FROM " + tableName +
                        " WHERE row_no >= " + to_string(from) +
                        " AND row_no < " + to_string(to) + " ORDER BY l_orderkey";*/

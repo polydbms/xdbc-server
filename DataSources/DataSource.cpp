@@ -1,4 +1,5 @@
 #include "DataSource.h"
+#include <iomanip>
 
 DataSource::DataSource(RuntimeEnv &xdbcEnv, std::string tableName) :
         xdbcEnv(&xdbcEnv),
@@ -37,4 +38,34 @@ double DataSource::double_swap(double d) {
     dest.bytes[6] = src.bytes[1];
     dest.bytes[7] = src.bytes[0];
     return dest.d;
+}
+
+std::string DataSource::formatSchema(const std::vector<std::tuple<std::string, std::string, int>> &schema) {
+    std::stringstream ss;
+
+    // Header line
+    ss << std::setw(20) << std::left << "Name"
+       << std::setw(15) << std::left << "Type"
+       << std::setw(10) << std::left << "Size"
+       << '\n';
+
+    for (const auto &tuple: schema) {
+        ss << std::setw(20) << std::left << std::get<0>(tuple)
+           << std::setw(15) << std::left << std::get<1>(tuple)
+           << std::setw(10) << std::left << std::get<2>(tuple)
+           << '\n';
+    }
+
+    return ss.str();
+}
+
+std::string DataSource::getAttributesAsStr(const std::vector<std::tuple<std::string, std::string, int>>& schema) {
+    std::string result;
+    for (const auto& tuple : schema) {
+        result += std::get<0>(tuple) + ", ";
+    }
+    if (!result.empty()) {
+        result.erase(result.size() - 2); // Remove the trailing comma and space
+    }
+    return result;
 }

@@ -62,6 +62,10 @@ public:
 
     double double_swap(double d);
 
+    std::string formatSchema(const std::vector<std::tuple<std::string, std::string, int>> &schema);
+
+    std::string getAttributesAsStr(const std::vector<std::tuple<std::string, std::string, int>> &schema);
+
 private:
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;
@@ -69,6 +73,7 @@ private:
     std::vector<std::atomic<int>> &flagArr;
     RuntimeEnv *xdbcEnv;
     std::string tableName;
+
 };
 
 

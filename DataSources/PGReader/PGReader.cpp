@@ -8,6 +8,7 @@
 #include <thread>
 #include "spdlog/spdlog.h"
 
+
 using namespace std;
 using namespace pqxx;
 using namespace boost::asio;
@@ -21,8 +22,20 @@ PGReader::PGReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
         totalReadBuffers(0),
         finishedReading(false),
         xdbcEnv(&xdbcEnv),
-        tableName(tableName) {
+        tableName(tableName),
+        schema() {
 
+    // TODO: move schema creation somewhere else
+    schema.emplace_back("l_orderkey", "INT", 4);
+    schema.emplace_back("l_partkey", "INT", 4);
+    schema.emplace_back("l_suppkey", "INT", 4);
+    schema.emplace_back("l_linenumber", "INT", 4);
+    schema.emplace_back("l_quantity", "DOUBLE", 8);
+    schema.emplace_back("l_extendedprice", "DOUBLE", 8);
+    schema.emplace_back("l_discount", "DOUBLE", 8);
+    schema.emplace_back("l_tax", "DOUBLE", 8);
+
+    spdlog::get("XDBC.SERVER")->info("Table schema:\n{0}", formatSchema(schema));
 }
 
 int PGReader::getTotalReadBuffers() const {
@@ -369,7 +382,8 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
 
 
     std::string qStr =
-            "COPY (SELECT * FROM " + tableName + " WHERE ctid BETWEEN '(" + std::to_string(from) + ",0)'::tid AND '(" +
+            "COPY (SELECT " + getAttributesAsStr(schema) + " FROM " + tableName + " WHERE ctid BETWEEN '(" +
+            std::to_string(from) + ",0)'::tid AND '(" +
             std::to_string(to) + ",0)'::tid) TO STDOUT WITH (FORMAT text, DELIMITER '|')";
 
     spdlog::get("XDBC.SERVER")->info("PG thread {0} runs query: {1}", thr, qStr);
@@ -419,12 +433,10 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
         if (xdbcEnv->iformat == 1)
             mv = bufferTupleId * (xdbcEnv->tuple_size);
         else if (xdbcEnv->iformat == 2)
-            mv = bufferTupleId * 4;
+            mv = bufferTupleId * std::get<2>(schema[0]);
 
-        // TODO: introduce dynamic schema
-        //for now int, int, int, int, double, double, double, double
-
-        for (int i = 0; i < 7; i++) {
+        for (auto it = schema.begin(); it != std::prev(schema.end()); ++it) {
+            const auto &tuple = *it;
 
             endPtr = strchr(startPtr, '|');
             len = endPtr - startPtr;
@@ -437,7 +449,8 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
             int celli = -1;
             double celld = -1;
 
-            if (i < 4) {
+
+            if (std::get<1>(tuple) == "INT") {
                 celli = stoi(tmp);
                 if (xdbcEnv->iformat == 1) {
                     memcpy(bp[curBid].data() + mv, &celli, 4);
@@ -447,7 +460,9 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
                     mv += xdbcEnv->buffer_size * 4;
                 }
 
-            } else {
+            }
+
+            if (std::get<1>(tuple) == "DOUBLE") {
                 celld = stod(tmp);
 
                 if (xdbcEnv->iformat == 1) {
@@ -459,6 +474,8 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
                 }
             }
 
+            //TODO: add more types
+
         }
 
         //handle last element after |
@@ -468,8 +485,16 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
         memcpy(tmp, startPtr, len);
         tmp[len] = '\0';
 
-        double last = stod(tmp);
-        memcpy(bp[curBid].data() + mv, &last, 8);
+        if (std::get<1>(schema.back()) == "INT") {
+            int last = stoi(tmp);
+            memcpy(bp[curBid].data() + mv, &last, 4);
+        }
+
+        if (std::get<1>(schema.back()) == "DOUBLE") {
+            double last = stod(tmp);
+            memcpy(bp[curBid].data() + mv, &last, 8);
+        }
+
 
         //spdlog::get("XDBC.SERVER")->info("writing to {0},{1}: ", curBid, bufferTupleId);
         //spdlog::get("XDBC.SERVER")->info("Thread {0} wrote tuple: {1}", thr, totalThreadWrittenTuples);
@@ -504,67 +529,43 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
                                          thr, xdbcEnv->buffer_size - bufferTupleId);
 
         //TODO: remove dirty fix, potentially with buffer header or resizable buffers
-        if (xdbcEnv->iformat == 1) {
-            for (int i = bufferTupleId; i < xdbcEnv->buffer_size; i++) {
-                int mone = -1;
-                double dmone = -1;
-                int mv = bufferTupleId * (xdbcEnv->tuple_size);
+        int mone = -1;
+        double dmone = -1;
+        int mv = 0;
 
-                memcpy(bp[curBid].data() + mv, &mone, 4);
-                mv += 4;
-                memcpy(bp[curBid].data() + mv, &mone, 4);
-                mv += 4;
-                memcpy(bp[curBid].data() + mv, &mone, 4);
-                mv += 4;
-                memcpy(bp[curBid].data() + mv, &mone, 4);
-                mv += 4;
-                memcpy(bp[curBid].data() + mv, &dmone, 8);
-                mv += 8;
-                memcpy(bp[curBid].data() + mv, &dmone, 8);
-                mv += 8;
-                memcpy(bp[curBid].data() + mv, &dmone, 8);
-                mv += 8;
-                memcpy(bp[curBid].data() + mv, &dmone, 8);
-                //bp[curBid][bufferTupleId] = {-1, -1, -1, -1, -1, -1, -1, -1};
+        if (xdbcEnv->iformat == 1)
+            mv = bufferTupleId * (xdbcEnv->tuple_size);
+        if (xdbcEnv->iformat == 2)
+            mv = bufferTupleId * std::get<2>(schema[0]);
+
+        for (int i = bufferTupleId; i < xdbcEnv->buffer_size; i++) {
+            for (const auto &tuple: schema) {
+
+                if (std::get<1>(tuple) == "INT")
+                    memcpy(bp[curBid].data() + mv, &mone, std::get<2>(tuple));
+
+                if (std::get<1>(tuple) == "DOUBLE")
+                    memcpy(bp[curBid].data() + mv, &dmone, std::get<2>(tuple));
+
+                if (xdbcEnv->iformat == 1)
+                    mv += std::get<2>(tuple);
+
+                if (xdbcEnv->iformat == 2)
+                    mv += xdbcEnv->buffer_size * std::get<2>(tuple);
+
             }
-
-        }
-
-        if (xdbcEnv->iformat == 2) {
-
-            int mv = bufferTupleId * 4;
-
-            int mone = -1;
-            double dmone = -1;
-
-            memcpy(bp[curBid].data() + mv, &mone, 4);
-            mv += xdbcEnv->buffer_size * 4;
-            memcpy(bp[curBid].data() + mv, &mone, 4);
-            mv += xdbcEnv->buffer_size * 4;
-            memcpy(bp[curBid].data() + mv, &mone, 4);
-            mv += xdbcEnv->buffer_size * 4;
-            memcpy(bp[curBid].data() + mv, &mone, 4);
-            mv += xdbcEnv->buffer_size * 4;
-            memcpy(bp[curBid].data() + mv, &dmone, 8);
-            mv += xdbcEnv->buffer_size * 8;
-            memcpy(bp[curBid].data() + mv, &dmone, 8);
-            mv += xdbcEnv->buffer_size * 8;
-            memcpy(bp[curBid].data() + mv, &dmone, 8);
-            mv += xdbcEnv->buffer_size * 8;
-            memcpy(bp[curBid].data() + mv, &dmone, 8);
-
         }
 
         flagArr[curBid] = 0;
         totalReadBuffers.fetch_add(1);
         totalThreadWrittenBuffers++;
     }
-    /* we now check the last received length returned by copy data */
+/* we now check the last received length returned by copy data */
     if (receiveLength == 0) {
-        /* we cannot read more data without blocking */
+/* we cannot read more data without blocking */
         spdlog::get("XDBC.SERVER")->warn("PG Reader received 0");
     } else if (receiveLength == -1) {
-        /* received copy done message */
+/* received copy done message */
         PGresult *result = PQgetResult(connection);
         ExecStatusType resultStatus = PQresultStatus(result);
 
@@ -577,11 +578,11 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
 
         PQclear(result);
     } else if (receiveLength == -2) {
-        /* received an error */
+/* received an error */
         spdlog::get("XDBC.SERVER")->warn("PG thread {0} Copy failed bc -2", thr);
     }
 
-    /* if copy out completed, make sure we drain all results from libpq */
+/* if copy out completed, make sure we drain all results from libpq */
     if (receiveLength < 0) {
         PGresult *result = PQgetResult(connection);
         while (result != NULL) {
