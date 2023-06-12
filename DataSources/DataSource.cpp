@@ -59,9 +59,9 @@ std::string DataSource::formatSchema(const std::vector<std::tuple<std::string, s
     return ss.str();
 }
 
-std::string DataSource::getAttributesAsStr(const std::vector<std::tuple<std::string, std::string, int>>& schema) {
+std::string DataSource::getAttributesAsStr(const std::vector<std::tuple<std::string, std::string, int>> &schema) {
     std::string result;
-    for (const auto& tuple : schema) {
+    for (const auto &tuple: schema) {
         result += std::get<0>(tuple) + ", ";
     }
     if (!result.empty()) {
