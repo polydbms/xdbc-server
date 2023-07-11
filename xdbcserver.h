@@ -23,6 +23,17 @@
 using namespace boost::asio;
 using ip::tcp;
 
+constexpr size_t MAX_ATTRIBUTES = 10;
+struct Header {
+
+    size_t compressionType;
+    size_t totalSize;
+    size_t intermediateFormat;
+    size_t crc;
+    size_t attributeSize[MAX_ATTRIBUTES];
+    size_t attributeComp[MAX_ATTRIBUTES];
+
+};
 
 class XDBCServer {
 public:

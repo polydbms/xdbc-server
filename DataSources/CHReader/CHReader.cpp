@@ -21,18 +21,9 @@ CHReader::CHReader(RuntimeEnv &xdbcEnv, const std::string tableName) :
         totalReadBuffers(0),
         finishedReading(false),
         xdbcEnv(&xdbcEnv),
-        tableName(tableName),
-        schema() {
+        tableName(tableName) {
 
-    // TODO: move schema creation somewhere else
-    schema.emplace_back("l_orderkey", "INT", 4);
-    schema.emplace_back("l_partkey", "INT", 4);
-    schema.emplace_back("l_suppkey", "INT", 4);
-    schema.emplace_back("l_linenumber", "INT", 4);
-    schema.emplace_back("l_quantity", "DOUBLE", 8);
-    schema.emplace_back("l_extendedprice", "DOUBLE", 8);
-    schema.emplace_back("l_discount", "DOUBLE", 8);
-    schema.emplace_back("l_tax", "DOUBLE", 8);
+    spdlog::get("XDBC.SERVER")->info("CH Reader, table schema:\n{0}", formatSchema(xdbcEnv.schema));
 
 }
 
@@ -101,6 +92,7 @@ void CHReader::readData() {
 
 int CHReader::getMaxRowNum(const string &tableName) {
 
+    // TODO: check connection properly
     Client client(ClientOptions().SetHost("ch").SetPort(9000));
     client.Execute("DROP VIEW IF EXISTS tmp_view");
     client.Execute("CREATE VIEW tmp_view AS SELECT rowNumberInAllBlocks() as row_no,* FROM " + tableName +
@@ -136,7 +128,7 @@ int CHReader::chWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
     //TODO: fix dynamic schema
     //TODO: fix clickhouse partitioning
     std::string qStr =
-            "SELECT " + getAttributesAsStr(schema) +
+            "SELECT " + getAttributesAsStr(xdbcEnv->schema) +
             //" FROM (SELECT rowNumberInAllBlocks() as row_no,* FROM " + tableName +
             //" ORDER BY l_orderkey, l_partkey, l_suppkey)" +
             " FROM tmp_view"
@@ -175,10 +167,10 @@ int CHReader::chWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
                           if (xdbcEnv->iformat == 1)
                               mv = bufferTupleId * (xdbcEnv->tuple_size);
                           else if (xdbcEnv->iformat == 2)
-                              mv = bufferTupleId * std::get<2>(schema[0]);
+                              mv = bufferTupleId * std::get<2>(xdbcEnv->schema[0]);
 
                           int ti = 0;
-                          for (auto it = schema.begin(); it != std::prev(schema.end()); ++it) {
+                          for (auto it = xdbcEnv->schema.begin(); it != std::prev(xdbcEnv->schema.end()); ++it) {
                               const auto &tuple = *it;
                               if (std::get<1>(tuple) == "INT") {
                                   memcpy(bp[curBid].data() + mv, &block[ti]->As<ColumnInt32>()->At(i), 4);
@@ -237,9 +229,9 @@ int CHReader::chWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
             if (xdbcEnv->iformat == 1)
                 mv = bufferTupleId * (xdbcEnv->tuple_size);
             if (xdbcEnv->iformat == 2)
-                mv = bufferTupleId * std::get<2>(schema[0]);
+                mv = bufferTupleId * std::get<2>(xdbcEnv->schema[0]);
 
-            for (const auto &tuple: schema) {
+            for (const auto &tuple: xdbcEnv->schema) {
 
                 if (std::get<1>(tuple) == "INT")
                     memcpy(bp[curBid].data() + mv, &mone, std::get<2>(tuple));

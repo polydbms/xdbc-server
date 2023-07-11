@@ -150,36 +150,69 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
 
         if (cont) {
             //TODO: replace function with a hashmap or similar
-            //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib
+            //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib, 6 cols
             size_t compId = Compressor::getCompId(xdbcEnv.compression_algorithm);
-            size_t compressed_size = Compressor::compress_buffer(xdbcEnv.compression_algorithm, bp[bufferId].data(),
-                                                                 xdbcEnv.buffer_size * xdbcEnv.tuple_size);
 
-            if (compressed_size > xdbcEnv.buffer_size * xdbcEnv.tuple_size) {
+            //spdlog::get("XDBC.SERVER")->warn("Send thread {0} entering compression", thr);
+
+            std::array<size_t, MAX_ATTRIBUTES> compressed_sizes = Compressor::compress_buffer(
+                    xdbcEnv.compression_algorithm, bp[bufferId].data(),
+                    xdbcEnv.buffer_size * xdbcEnv.tuple_size,
+                    xdbcEnv.buffer_size, xdbcEnv.schema);
+
+            size_t totalSize = 0;
+            //TODO: check if schema larger than MAX_ATTRIBUTES
+
+            if (xdbcEnv.compression_algorithm == "cols" &&
+                compressed_sizes[0] == xdbcEnv.buffer_size * xdbcEnv.tuple_size)
+                totalSize = compressed_sizes[0];
+            else {
+                for (int i = 0; i < xdbcEnv.schema.size(); i++) {
+                    totalSize += compressed_sizes[i];
+                }
+
+            }
+
+            //spdlog::get("XDBC.SERVER")->warn("Send thread {0} exited compression with total size {1}/{2}", thr,
+            //                                             totalSize, xdbcEnv.buffer_size * xdbcEnv.tuple_size);
+
+            if (totalSize > xdbcEnv.buffer_size * xdbcEnv.tuple_size) {
                 spdlog::get("XDBC.SERVER")->warn("Send thread {0} compression more than buffer", thr);
                 compId = 0;
             }
-            if (compressed_size == xdbcEnv.buffer_size * xdbcEnv.tuple_size) {
+            if (totalSize == xdbcEnv.buffer_size * xdbcEnv.tuple_size) {
                 compId = 0;
             }
 
-            if (compressed_size <= 0)
-                spdlog::get("XDBC.SERVER")->error("Send thread {0} compression:  {1}, error: ",
-                                                  thr, compId, compressed_size);
+            if (totalSize <= 0)
+                spdlog::get("XDBC.SERVER")->error("Send thread {0} compression: {1}, totalSize: {2}",
+                                                  thr, compId, totalSize);
 
             if (bufferId == 0)
                 spdlog::get("XDBC.SERVER")->info("Send thread {0}, buffer: {1}, buffSize: {2}, ratio: {3}",
-                                                 thr, bufferId, compressed_size,
-                                                 static_cast<double>(compressed_size) /
+                                                 thr, bufferId, totalSize,
+                                                 static_cast<double>(totalSize) /
                                                  (xdbcEnv.buffer_size * xdbcEnv.tuple_size));
 
             //TODO: create more sophisticated header with checksum etc
 
-            std::array<size_t, 4> header{compId, compressed_size, compute_crc(bp[bufferId].data(), compressed_size),
-                                         static_cast<size_t>(xdbcEnv.iformat)};
+            Header head;
+            head.compressionType = compId;
+            head.totalSize = totalSize;
+            head.intermediateFormat = static_cast<size_t>(xdbcEnv.iformat);
+            head.crc = compute_crc(bp[bufferId].data(), totalSize);
+            head.attributeComp;
 
-            tmpHeaderBuff = boost::asio::buffer(header);
-            tmpMsgBuff = boost::asio::buffer(bp[bufferId], compressed_size);
+
+            std::copy(compressed_sizes.begin(), compressed_sizes.end(), head.attributeSize);
+            //head.attributeSize = compressed_sizes;
+
+            //std::array<size_t, 4> header{compId, compressed_size, compute_crc(bp[bufferId].data(), compressed_size),
+            //                             static_cast<size_t>(xdbcEnv.iformat)};
+
+            //tmpHeaderBuff = boost::asio::buffer(header);
+            tmpHeaderBuff = boost::asio::buffer(&head, sizeof(Header));
+            tmpMsgBuff = boost::asio::buffer(bp[bufferId], totalSize);
             sendBuffer = {tmpHeaderBuff, tmpMsgBuff};
 
             try {

@@ -20,7 +20,7 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
             ("system,y", po::value<string>()->default_value("postgres"),
              "Set system: \nDefault:\n  postgres\nOther:\n  clickhouse")
             ("compression-type,c", po::value<string>()->default_value("nocomp"),
-             "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4\n zlib")
+             "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4\n zlib\n cols")
             ("intermediate-format,f", po::value<int>()->default_value(1),
              "Set intermediate-format: \nDefault:\n  1 (row)\nOther:\n  2 (col)")
             ("buffer-size,b", po::value<int>()->default_value(1000),
@@ -95,6 +95,19 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
         env.network_parallelism = vm["network-parallelism"].as<int>();
     }
 
+    //create schema
+    std::vector<std::tuple<std::string, std::string, int>> schema;
+    schema.emplace_back("l_orderkey", "INT", 4);
+    schema.emplace_back("l_partkey", "INT", 4);
+    schema.emplace_back("l_suppkey", "INT", 4);
+    schema.emplace_back("l_linenumber", "INT", 4);
+    schema.emplace_back("l_quantity", "DOUBLE", 8);
+    schema.emplace_back("l_extendedprice", "DOUBLE", 8);
+    schema.emplace_back("l_discount", "DOUBLE", 8);
+    schema.emplace_back("l_tax", "DOUBLE", 8);
+
+
+    env.schema = schema;
     return env;
 }
 

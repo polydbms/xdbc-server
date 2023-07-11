@@ -6,6 +6,9 @@
 #include <lz4.h>
 #include <zlib.h>
 #include "spdlog/spdlog.h"
+#include <fastpfor/codecfactory.h>
+#include <fastpfor/deltautil.h>
+#include <fpzip.h>
 
 size_t Compressor::getCompId(const std::string &name) {
 
@@ -21,6 +24,8 @@ size_t Compressor::getCompId(const std::string &name) {
         return 4;
     if (name == "zlib")
         return 5;
+    if (name == "cols")
+        return 6;
 
     return 0;
 }
@@ -50,8 +55,41 @@ size_t Compressor::compress_zstd(void *data, size_t size) {
     // Copy the compressed data back to the original buffer
     std::memcpy(data, compressedBuffer.data(), compressedSize);
 
+    compressedBuffer.clear();
+    compressedBuffer.shrink_to_fit();
+
     return compressedSize;
 }
+
+size_t Compressor::compress_zstd(void *data, void *dst, size_t size) {
+
+    // Calculate the maximum compressed size
+    size_t maxCompressedSize = ZSTD_compressBound(size);
+
+    // Create a temporary buffer for the compressed data
+    std::vector<char> compressedBuffer(maxCompressedSize);
+
+    // Compress the data
+    size_t compressedSize = ZSTD_compress(
+            compressedBuffer.data(), maxCompressedSize, data, size, /* compression level */ 1);
+
+    // Check if compression was successful
+    if (ZSTD_isError(compressedSize)) {
+        // Compression error occurred
+        spdlog::get("XDBC.SERVER")->warn("Zstd Compression error: {0}", std::string(ZSTD_getErrorName(compressedSize)));
+        //TODO: handle error
+        return size;
+    }
+
+    // Copy the compressed data back to the original buffer
+    std::memcpy(dst, compressedBuffer.data(), compressedSize);
+
+    compressedBuffer.clear();
+    compressedBuffer.shrink_to_fit();
+
+    return compressedSize;
+}
+
 
 size_t Compressor::compress_snappy(void *data, size_t size) {
     // Calculate the maximum compressed size
@@ -75,6 +113,32 @@ size_t Compressor::compress_snappy(void *data, size_t size) {
 
     // Copy the compressed data back to the original buffer
     std::memcpy(data, compressedBuffer.data(), compressedSize);
+
+    return compressedSize;
+}
+
+size_t Compressor::compress_snappy(void *data, void *dst, size_t size) {
+    // Calculate the maximum compressed size
+    size_t maxCompressedSize = snappy::MaxCompressedLength(size);
+
+    // Create a temporary buffer for the compressed data
+    std::vector<char> compressedBuffer(maxCompressedSize);
+
+    // Compress the data
+    size_t compressedSize;
+    snappy::RawCompress(static_cast<const char *>(data), size, compressedBuffer.data(), &compressedSize);
+
+    // Check if compression was successful
+    if (compressedSize > maxCompressedSize) {
+        // Compression error occurred
+        spdlog::get("XDBC.SERVER")->warn("Snappy compression  compressed size exceeds maximum size: {0}",
+                                         compressedSize);
+
+        return size;
+    }
+
+    // Copy the compressed data back to the original buffer
+    std::memcpy(dst, compressedBuffer.data(), compressedSize);
 
     return compressedSize;
 }
@@ -157,30 +221,179 @@ size_t Compressor::compress_zlib(void *data, size_t size) {
 }
 
 
-size_t Compressor::compress_buffer(const std::string &method, void *data, size_t size) {
+std::array<size_t, MAX_ATTRIBUTES>
+Compressor::compress_buffer(const std::string &method, void *data, size_t size, size_t buff_size,
+                            const std::vector<std::tuple<std::string, std::string, int>> &schema) {
+
 
     //1 zstd
     //2 snappy
     //3 lzo
     //4 lz4
     //5 zlib
+    //6 cols
+
+    std::array<size_t, MAX_ATTRIBUTES> ret{};
+    for (size_t i = 0; i < MAX_ATTRIBUTES; i++)
+        ret[i] = 0;
 
     if (method == "zstd")
-        return compress_zstd(data, size);
+        ret[0] = compress_zstd(data, size);
+    else if (method == "snappy")
+        ret[0] = compress_snappy(data, size);
+    else if (method == "lzo")
+        ret[0] = compress_lzo(data, size);
+    else if (method == "lz4")
+        ret[0] = compress_lz4(data, size);
+    else if (method == "zlib")
+        ret[0] = compress_zlib(data, size);
+    else if (method == "cols") {
+        ret = compress_cols(data, size, buff_size, schema);
+        //no method picked, not compressing
+    } else
+        ret[0] = size;
+    return ret;
+}
 
-    if (method == "snappy")
-        return compress_snappy(data, size);
-
-    if (method == "lzo")
-        return compress_lzo(data, size);
-
-    if (method == "lz4")
-        return compress_lz4(data, size);
-
-    if (method == "zlib")
-        return compress_zlib(data, size);
-
-    //no method picked, not compressing
+/* compress floating-point data */
+static size_t compress(FPZ *fpz, const void *data) {
+    size_t size;
+    /* write header */
+    if (!fpzip_write_header(fpz)) {
+        fprintf(stderr, "cannot write header: %s\n", fpzip_errstr[fpzip_errno]);
+        return 0;
+    }
+    /* perform actual compression */
+    size = fpzip_write(fpz, data);
+    if (!size) {
+        spdlog::get("XDBC.SERVER")->error("Compressor: fpzip failed, error: {0}", fpzip_errstr[fpzip_errno]);
+        return 0;
+    }
     return size;
+}
+
+size_t compressIntColumn(uint32_t *in, void *out, size_t buff_size) {
+
+    //memcpy(out, in, buffer_size * 48);
+    //return buffer_size;
+    //spdlog::get("XDBC.SERVER")->error("Compressor: Entered compressIntCol, input size: {0}", size);
+
+    std::vector<int> compressedData(buff_size);
+
+    using namespace FastPForLib;
+    CODECFactory factory;
+
+    IntegerCODEC &codec = *factory.getFromName("simdfastpfor256");
+
+    //std::vector<uint32_t> compressed_output(buffer_size + 1024);
+
+    size_t compressedsize = buff_size + 1024;
+    codec.encodeArray(in, buff_size, reinterpret_cast<uint32_t *>(out),
+                      compressedsize);
+    //compressed_output.resize(compressedsize);
+    //compressed_output.shrink_to_fit();
+
+    //memcpy(out, compressedData.data(), compressedsize * 4);
+
+    //spdlog::get("XDBC.SERVER")->error("compressedsize: {0}, in first value: {1}", compressedsize, uint_data[0]);
+    //TODO: remove code for decompression
+    //auto testData = reinterpret_cast<uint32_t *>(out);
+    /*std::vector<uint32_t> mydataback(buffer_size);
+    size_t recoveredsize = mydataback.size();
+
+    codec.decodeArray(testData, compressedsize,
+                      mydataback.data(), recoveredsize);
+
+    spdlog::get("XDBC.SERVER")->error("Test in: {0}, out:{1}", in[0], mydataback[0]);
+
+    if (mydataback[0] != testData[0]) {
+        spdlog::get("XDBC.SERVER")->error("Unequal values: {0}!={1}", mydataback[0], testData[0]);
+    }*/
+    //spdlog::get("XDBC.SERVER")->error("Compressor: compressed input: {0}, output: {1}", buffer_size, compressedsize);
+    //spdlog::get("XDBC.SERVER")->error("Decompressed data: {0}", mydataback[0]);
+
+    return compressedsize;
+}
+
+size_t compressDoubleColumn(const double *in, void *out, size_t size) {
+
+
+    int status;
+
+    size_t inbytes = size * sizeof(double);
+    size_t bufbytes = 1024 + inbytes;
+    size_t outbytes = 0;
+    //void *buffer = malloc(bufbytes);
+
+    /* compress to memory */
+    FPZ *fpz = fpzip_write_to_buffer(out, bufbytes);
+    fpz->type = FPZIP_TYPE_DOUBLE;
+    fpz->prec = 0;
+    fpz->nx = size;
+    fpz->ny = 1;
+    fpz->nz = 1;
+    fpz->nf = 1;
+    outbytes = compress(fpz, in);
+    status = (0 < outbytes && outbytes <= bufbytes);
+    fpzip_write_close(fpz);
+
+
+    return outbytes;
+}
+
+std::array<size_t, MAX_ATTRIBUTES> Compressor::compress_cols(void *data, size_t size, size_t buff_size,
+                                                             const std::vector<std::tuple<std::string, std::string, int>> &schema) {
+
+    std::array<size_t, MAX_ATTRIBUTES> compressedColumns{};
+
+    //TODO: get schema size automatically
+    std::vector<std::byte> outputBuf(size);
+    auto compressedPtr = outputBuf.data();
+
+    int attributeNum = 0;
+    size_t totalSize = 0;
+
+    int bytesWritten = 0;
+    for (const auto &attribute: schema) {
+        const std::string &attributeType = std::get<1>(attribute);
+        int attributeSize = std::get<2>(attribute);
+
+        //spdlog::get("XDBC.SERVER")->warn("handling attribute: {0} with attributeNum: {1}", std::get<0>(attribute), attributeNum);
+        size_t compressedDataSize = 0;
+        if (attributeType == "INT") {
+            uint32_t *decompressedPtr = reinterpret_cast<uint32_t *>(reinterpret_cast<std::byte *>(data) +
+                                                                     buff_size * bytesWritten);
+            size_t compressedDataSizeElements = compressIntColumn(decompressedPtr, compressedPtr, buff_size);
+            compressedDataSize = compressedDataSizeElements * attributeSize;
+            bytesWritten += 4;
+
+            //compressedDataSize += 4 * buffer_size;
+            //spdlog::get("XDBC.SERVER")->warn("compressedDataSize: {0}, added {1} ", compressedDataSize, 4*buffer_size);
+        } else if (attributeType == "DOUBLE") {
+            //TODO: refactor compress fpzip in other function
+            double *decompressedPtr = reinterpret_cast<double *>(reinterpret_cast<std::byte *>(data) +
+                                                                 buff_size * bytesWritten);
+            compressedDataSize = compressDoubleColumn(decompressedPtr, compressedPtr, buff_size);
+            bytesWritten += 8;
+
+            //auto startPtr = reinterpret_cast<double *>(data) + buff_size * attributeNum;
+            //compressedDataSize = compress_zstd(decompressedPtr, compressedPtr, buff_size * 8);
+
+            //compressedDataSize += 8 * buffer_size;
+        }
+        compressedColumns[attributeNum] = compressedDataSize;
+        totalSize += compressedDataSize;
+        attributeNum++;
+        compressedPtr += compressedDataSize;
+        //spdlog::get("XDBC.SERVER")->warn("compressedDataSize: {0}", compressedDataSize);
+    }
+    if (totalSize >= size) {
+        spdlog::get("XDBC.SERVER")->warn("Compressor: buffer overflow {0}/{1}", totalSize, size);
+        //set first entry to total size, handle to send uncompressed
+        compressedColumns[0] = size;
+    } else
+        std::memcpy(data, outputBuf.data(), totalSize);
+
+    return compressedColumns;
 }
 

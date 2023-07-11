@@ -22,20 +22,9 @@ PGReader::PGReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
         totalReadBuffers(0),
         finishedReading(false),
         xdbcEnv(&xdbcEnv),
-        tableName(tableName),
-        schema() {
+        tableName(tableName) {
 
-    // TODO: move schema creation somewhere else
-    schema.emplace_back("l_orderkey", "INT", 4);
-    schema.emplace_back("l_partkey", "INT", 4);
-    schema.emplace_back("l_suppkey", "INT", 4);
-    schema.emplace_back("l_linenumber", "INT", 4);
-    schema.emplace_back("l_quantity", "DOUBLE", 8);
-    schema.emplace_back("l_extendedprice", "DOUBLE", 8);
-    schema.emplace_back("l_discount", "DOUBLE", 8);
-    schema.emplace_back("l_tax", "DOUBLE", 8);
-
-    spdlog::get("XDBC.SERVER")->info("Table schema:\n{0}", formatSchema(schema));
+    spdlog::get("XDBC.SERVER")->info("PG Reader, table schema:\n{0}", formatSchema(xdbcEnv.schema));
 }
 
 int PGReader::getTotalReadBuffers() const {
@@ -382,7 +371,7 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
 
 
     std::string qStr =
-            "COPY (SELECT " + getAttributesAsStr(schema) + " FROM " + tableName + " WHERE ctid BETWEEN '(" +
+            "COPY (SELECT " + getAttributesAsStr(xdbcEnv->schema) + " FROM " + tableName + " WHERE ctid BETWEEN '(" +
             std::to_string(from) + ",0)'::tid AND '(" +
             std::to_string(to) + ",0)'::tid) TO STDOUT WITH (FORMAT text, DELIMITER '|')";
 
@@ -428,14 +417,17 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
         }
 
         char *startPtr = receiveBuffer;
-        int mv = 0;
+/*        int mv = 0;
 
         if (xdbcEnv->iformat == 1)
             mv = bufferTupleId * (xdbcEnv->tuple_size);
         else if (xdbcEnv->iformat == 2)
-            mv = bufferTupleId * std::get<2>(schema[0]);
+            mv = bufferTupleId * std::get<2>(xdbcEnv->schema[0]);*/
 
-        for (auto it = schema.begin(); it != std::prev(schema.end()); ++it) {
+        int attPos = 0;
+        int bytesInTuple = 0;
+
+        for (auto it = xdbcEnv->schema.begin(); it != std::prev(xdbcEnv->schema.end()); ++it) {
             const auto &tuple = *it;
 
             endPtr = strchr(startPtr, '|');
@@ -449,32 +441,54 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
             int celli = -1;
             double celld = -1;
 
+            void *writePtr;
+            if (xdbcEnv->iformat == 1) {
+                writePtr =
+                        bp[curBid].data() + bufferTupleId * xdbcEnv->tuple_size + bytesInTuple;
+            } else if (xdbcEnv->iformat == 2) {
+                writePtr =
+                        bp[curBid].data() + bytesInTuple * xdbcEnv->buffer_size + bufferTupleId * std::get<2>(tuple);
+            }
 
             if (std::get<1>(tuple) == "INT") {
                 celli = stoi(tmp);
+                memcpy(writePtr, &celli, 4);
+            }
+            if (std::get<1>(tuple) == "DOUBLE") {
+                celld = stod(tmp);
+                memcpy(writePtr, &celld, 8);
+            }
+
+            /*if (std::get<1>(tuple) == "INT") {
+                celli = stoi(tmp);
+
+                //memcpy(bp[curBid].data() + mv, &celli, 4);
+
+                void *writePtr;
                 if (xdbcEnv->iformat == 1) {
-                    memcpy(bp[curBid].data() + mv, &celli, 4);
-                    mv += 4;
+                    writePtr = bp[curBid].data() + bufferTupleId * bytesInTuple;
+                    //mv += 4;
                 } else if (xdbcEnv->iformat == 2) {
-                    memcpy(bp[curBid].data() + mv, &celli, 4);
-                    mv += xdbcEnv->buffer_size * 4;
+                    writePtr = bp[curBid].data() + bufferTupleId * bytesInTuple * xdbcEnv->buffer_size;
+                    //mv += xdbcEnv->buffer_size * 4;
                 }
+                memcpy(writePtr, &celli, 4);
             }
 
             if (std::get<1>(tuple) == "DOUBLE") {
                 celld = stod(tmp);
+                memcpy(bp[curBid].data() + mv, &celld, 8);
 
                 if (xdbcEnv->iformat == 1) {
-                    memcpy(bp[curBid].data() + mv, &celld, 8);
                     mv += 8;
                 } else if (xdbcEnv->iformat == 2) {
-                    memcpy(bp[curBid].data() + mv, &celld, 8);
                     mv += xdbcEnv->buffer_size * 8;
                 }
-            }
+            }*/
 
             //TODO: add more types
-
+            attPos++;
+            bytesInTuple += std::get<2>(tuple);
         }
 
         //handle last element after |
@@ -484,15 +498,34 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
         memcpy(tmp, startPtr, len);
         tmp[len] = '\0';
 
-        if (std::get<1>(schema.back()) == "INT") {
+        void *writePtr;
+        if (xdbcEnv->iformat == 1) {
+            writePtr =
+                    bp[curBid].data() + bufferTupleId * xdbcEnv->tuple_size + bytesInTuple;
+        } else if (xdbcEnv->iformat == 2) {
+            writePtr =
+                    bp[curBid].data() + bytesInTuple * xdbcEnv->buffer_size +
+                    bufferTupleId * std::get<2>(xdbcEnv->schema[xdbcEnv->schema.size() - 1]);
+        }
+
+        if (std::get<1>(xdbcEnv->schema.back()) == "INT") {
+            int celli = stoi(tmp);
+            memcpy(writePtr, &celli, 4);
+        }
+        if (std::get<1>(xdbcEnv->schema.back()) == "DOUBLE") {
+            double celld = stod(tmp);
+            memcpy(writePtr, &celld, 8);
+        }
+
+        /*if (std::get<1>(xdbcEnv->schema.back()) == "INT") {
             int last = stoi(tmp);
             memcpy(bp[curBid].data() + mv, &last, 4);
         }
 
-        if (std::get<1>(schema.back()) == "DOUBLE") {
+        if (std::get<1>(xdbcEnv->schema.back()) == "DOUBLE") {
             double last = stod(tmp);
             memcpy(bp[curBid].data() + mv, &last, 8);
-        }
+        }*/
 
 
         //spdlog::get("XDBC.SERVER")->info("writing to {0},{1}: ", curBid, bufferTupleId);
@@ -502,6 +535,12 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
         bufferTupleId++;
 
         if (bufferTupleId == xdbcEnv->buffer_size) {
+            /*auto testI = reinterpret_cast<int *> (bp[curBid].data());
+            auto testD = reinterpret_cast<double *> (bp[curBid].data() + 4 * 4 * xdbcEnv->buffer_size +
+                                                     0 * xdbcEnv->buffer_size);
+
+            spdlog::get("XDBC.SERVER")->info("l_orderkey: {0}, l_quantity: {0}", testI[0], testD[0]);*/
+
             //cout << "wrote buffer " << bufferId << endl;
             bufferTupleId = 0;
             flagArr[curBid] = 0;
@@ -534,33 +573,17 @@ int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTup
 
         for (int i = bufferTupleId; i < xdbcEnv->buffer_size; i++) {
 
-            if (xdbcEnv->iformat == 1)
-                mv = bufferTupleId * (xdbcEnv->tuple_size);
-            if (xdbcEnv->iformat == 2)
-                mv = bufferTupleId * std::get<2>(schema[0]);
-
-            for (const auto &attribute: schema) {
-                /*spdlog::get("XDBC.SERVER")->info("thr {0} tuple attribute {1},{2},{3}", thr, std::get<0>(attribute),
-                                                 std::get<1>(attribute), std::get<2>(attribute));*/
-                if (std::get<1>(attribute) == "INT")
-                    memcpy(bp[curBid].data() + mv, &mone, 4);
-
-                //spdlog::get("XDBC.SERVER")->info("thr {0} filled int", thr);
-
-                if (std::get<1>(attribute) == "DOUBLE")
-                    memcpy(bp[curBid].data() + mv, &dmone, 8);
-
-                //spdlog::get("XDBC.SERVER")->info("thr {0} filled double", thr);
-
-                if (xdbcEnv->iformat == 1)
-                    mv += std::get<2>(attribute);
-
-                if (xdbcEnv->iformat == 2)
-                    mv += xdbcEnv->buffer_size * std::get<2>(attribute);
-
+            void *writePtr;
+            if (xdbcEnv->iformat == 1) {
+                writePtr = bp[curBid].data() + bufferTupleId * xdbcEnv->tuple_size;
+            } else if (xdbcEnv->iformat == 2) {
+                writePtr = bp[curBid].data() + bufferTupleId * std::get<2>(xdbcEnv->schema[0]);
             }
+
+            memcpy(writePtr, &mone, 4);
         }
 
+        //spdlog::get("XDBC.SERVER")->info("thr {0} finished remaining", thr);
         flagArr[curBid] = 0;
         totalReadBuffers.fetch_add(1);
         totalThreadWrittenBuffers++;

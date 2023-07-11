@@ -44,6 +44,7 @@ struct RuntimeEnv {
     std::vector<std::atomic<int>> *flagArrPtr;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
+    std::vector<std::tuple<std::string, std::string, int>> schema;
 };
 
 class DataSource {

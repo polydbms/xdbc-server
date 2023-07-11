@@ -30,7 +30,6 @@ private:
     std::vector<std::atomic<int>> &flagArr;
     RuntimeEnv *xdbcEnv;
     std::string tableName;
-    std::vector<std::tuple<std::string, std::string, int>> schema;
 };
 
 #endif // CH_READER_H
