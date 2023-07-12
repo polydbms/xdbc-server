@@ -6,9 +6,18 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <stack>
+#include <mutex>
 #include "../DataSource.h"
 
 class PGReader : public DataSource {
+
+    struct Part {
+        int id;
+        int startOff;
+        long endOff;
+    };
+
 public:
 
     PGReader(RuntimeEnv &xdbcEnv, const std::string &tableName);
@@ -21,7 +30,7 @@ public:
 
 private:
 
-    int pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
+    int pqWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
 
     int read_pqxx_stream();
 
@@ -37,6 +46,9 @@ private:
     std::vector<std::atomic<int>> &flagArr;
     RuntimeEnv *xdbcEnv;
     std::string tableName;
+    std::stack<struct Part> partStack;
+    std::mutex partStackMutex;
+
 };
 
 #endif // PG_READER_H
