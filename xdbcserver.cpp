@@ -75,7 +75,7 @@ bool XDBCServer::hasUnsent(DataSource &dataReader, int minBid, int maxBid) {
     /*if (pgReader.finishedReading && totalSentBuffers == pgReader.totalReadBuffers)
         return false;*/
     if (dataReader.getFinishedReading()) {
-        for (int i = minBid; i < maxBid - 1; i++) {
+        for (int i = minBid; i < maxBid; i++) {
             if (flagArr[i] == 0)
                 return true;
         }
@@ -106,6 +106,9 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     int minBId = thr * (xdbcEnv.bufferpool_size / xdbcEnv.network_parallelism);
     int maxBId = (thr + 1) * (xdbcEnv.bufferpool_size / xdbcEnv.network_parallelism);
 
+    //int minBId = 0;
+    //int maxBId = xdbcEnv.bufferpool_size;
+
     spdlog::get("XDBC.SERVER")->info(
             "Send thread {0} paired with Client read thread {1} assigned buffers [{2},{3}]",
             thr, readThreadId, minBId, maxBId);
@@ -134,13 +137,13 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
                 if (loops == 1000000) {
                     loops = 0;
                     spdlog::get("XDBC.SERVER")->warn(
-                            "Send thread {0} stuck in send at buffer: {1}, sentBuffs: ({2}/{3}), totalReadBuffs: {4} ",
+                            "Send thread {0} stuck in send at buffer: {1}, threadSentBuffs/totalSentBuffs: {2}/{3}, totalReadBuffs: {4} ",
                             thr, bufferId, threadSentBuffers, totalSentBuffers, dataReader.getTotalReadBuffers());
 
                     std::this_thread::sleep_for(xdbcEnv.sleep_time);
                 }
                 if (!hasUnsent(dataReader, minBId, maxBId)) {
-                    spdlog::get("XDBC.SERVER")->warn("Send thread {0} exiting", thr);
+                    spdlog::get("XDBC.SERVER")->warn("Send thread {0} exiting unexpectedly", thr);
                     cont = false;
                     break;
                 }
