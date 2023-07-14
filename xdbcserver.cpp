@@ -191,11 +191,11 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
                 spdlog::get("XDBC.SERVER")->error("Send thread {0} compression: {1}, totalSize: {2}",
                                                   thr, compId, totalSize);
 
-            if (bufferId == 0)
+/*            if (bufferId == 0)
                 spdlog::get("XDBC.SERVER")->info("Send thread {0}, buffer: {1}, buffSize: {2}, ratio: {3}",
                                                  thr, bufferId, totalSize,
                                                  static_cast<double>(totalSize) /
-                                                 (xdbcEnv.buffer_size * xdbcEnv.tuple_size));
+                                                 (xdbcEnv.buffer_size * xdbcEnv.tuple_size));*/
 
             //TODO: create more sophisticated header with checksum etc
 

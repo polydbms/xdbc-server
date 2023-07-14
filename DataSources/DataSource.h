@@ -11,6 +11,13 @@
 //#define TUPLE_SIZE 48
 //#define SLEEP_TIME 5ms
 
+struct Part {
+    int id;
+    int startOff;
+    long endOff;
+};
+
+
 struct shortLineitem {
     int l_orderkey;
     int l_partkey;
@@ -40,6 +47,7 @@ struct RuntimeEnv {
     int tuple_size;
     std::chrono::milliseconds sleep_time;
     int read_parallelism;
+    int read_partitions;
     int network_parallelism;
     std::vector<std::atomic<int>> *flagArrPtr;
     std::vector<std::vector<std::byte>> *bpPtr;

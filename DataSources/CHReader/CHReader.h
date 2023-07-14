@@ -6,6 +6,8 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <stack>
+#include <mutex>
 #include "../DataSource.h"
 
 class CHReader : public DataSource {
@@ -20,7 +22,7 @@ public:
     void readData();
 
 private:
-    int chWriteToBp(int thr, int from, long to, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
+    int chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
 
     static int getMaxRowNum(const std::string &tableName);
 
@@ -30,6 +32,8 @@ private:
     std::vector<std::atomic<int>> &flagArr;
     RuntimeEnv *xdbcEnv;
     std::string tableName;
+    std::stack<struct Part> partStack;
+    std::mutex partStackMutex;
 };
 
 #endif // CH_READER_H

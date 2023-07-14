@@ -12,12 +12,6 @@
 
 class PGReader : public DataSource {
 
-    struct Part {
-        int id;
-        int startOff;
-        long endOff;
-    };
-
 public:
 
     PGReader(RuntimeEnv &xdbcEnv, const std::string &tableName);

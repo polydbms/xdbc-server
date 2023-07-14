@@ -280,14 +280,11 @@ int PGReader::read_pq_copy() {
     int threadWrittenBuffers[xdbcEnv->read_parallelism];
     thread threads[xdbcEnv->read_parallelism];
 
-
-
-
     // TODO: throw something when table does not exist
 
     int maxCtId = getMaxCtId(tableName);
 
-    int partNum = 2 * xdbcEnv->read_parallelism;
+    int partNum = xdbcEnv->read_partitions;
     div_t partSizeDiv = div(maxCtId, partNum);
 
     int partSize = partSizeDiv.quot;
@@ -535,8 +532,6 @@ int PGReader::pqWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
                 //TODO: remove dirty fix, potentially with buffer header or resizable buffers
                 int mone = -1;
-                double dmone = -1;
-                int mv = 0;
 
                 for (int i = bufferTupleId; i < xdbcEnv->buffer_size; i++) {
 

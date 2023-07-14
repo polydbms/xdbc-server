@@ -30,6 +30,7 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
             ("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
             ("sleep-time,s", po::value<int>()->default_value(5), "Set a sleep-time in milli seconds.\nDefault: 5ms")
             ("read-parallelism,rp", po::value<int>()->default_value(4), "Set the read parallelism grade.\nDefault: 4")
+            ("read-partitions,rpp", po::value<int>()->default_value(4), "Set the number of read partitions.\nDefault: 4")
             ("network-parallelism,np", po::value<int>()->default_value(4),
              "Set the send parallelism grade.\nDefault: 4");
 
@@ -88,6 +89,11 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
         cout << "Read Parallelism "
              << vm["read-parallelism"].as<int>() << ".\n";
         env.read_parallelism = vm["read-parallelism"].as<int>();
+    }
+    if (vm.count("read-partitions")) {
+        cout << "Read partitions "
+             << vm["read-partitions"].as<int>() << ".\n";
+        env.read_partitions = vm["read-partitions"].as<int>();
     }
     if (vm.count("network-parallelism")) {
         cout << "Network Parallelism "
