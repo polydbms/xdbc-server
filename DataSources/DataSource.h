@@ -48,6 +48,7 @@ struct RuntimeEnv {
     std::chrono::milliseconds sleep_time;
     int read_parallelism;
     int read_partitions;
+    int deser_parallelism;
     int network_parallelism;
     std::vector<std::atomic<int>> *flagArrPtr;
     std::vector<std::vector<std::byte>> *bpPtr;

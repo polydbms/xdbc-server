@@ -9,9 +9,10 @@
 #include <stack>
 #include <mutex>
 #include "../DataSource.h"
+#include "queue.h"
 
 class PGReader : public DataSource {
-
+    typedef std::shared_ptr<queue<std::vector<std::string>>> Q_ptr;
 public:
 
     PGReader(RuntimeEnv &xdbcEnv, const std::string &tableName);
@@ -24,7 +25,9 @@ public:
 
 private:
 
-    int pqWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
+    int pqWriteToBp(int thr);
+
+    int writeTuplestoBp(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
 
     int read_pqxx_stream();
 
@@ -35,6 +38,7 @@ private:
     static int getMaxCtId(const std::string &tableName);
 
     std::atomic<bool> finishedReading;
+    std::vector<std::atomic<bool>> finishedCopy;
     std::atomic<int> totalReadBuffers;
     std::vector<std::vector<std::byte>> &bp;
     std::vector<std::atomic<int>> &flagArr;
@@ -42,7 +46,11 @@ private:
     std::string tableName;
     std::stack<struct Part> partStack;
     std::mutex partStackMutex;
+    //std::stack<std::vector<std::string>> tupleStack;
+    //std::mutex tupleStackMutex;
+    std::vector<Q_ptr> qs;
 
+    bool getFinishedCopy() const;
 };
 
 #endif // PG_READER_H

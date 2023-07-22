@@ -30,7 +30,10 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
             ("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
             ("sleep-time,s", po::value<int>()->default_value(5), "Set a sleep-time in milli seconds.\nDefault: 5ms")
             ("read-parallelism,rp", po::value<int>()->default_value(4), "Set the read parallelism grade.\nDefault: 4")
-            ("read-partitions,rpp", po::value<int>()->default_value(4), "Set the number of read partitions.\nDefault: 4")
+            ("read-partitions,rpp", po::value<int>()->default_value(4),
+             "Set the number of read partitions.\nDefault: 4")
+            ("deser-parallelism,dp", po::value<int>()->default_value(4),
+             "Set the number of deserialization parallelism.\nDefault: 4")
             ("network-parallelism,np", po::value<int>()->default_value(4),
              "Set the send parallelism grade.\nDefault: 4");
 
@@ -100,6 +103,11 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
              << vm["network-parallelism"].as<int>() << ".\n";
         env.network_parallelism = vm["network-parallelism"].as<int>();
     }
+    if (vm.count("deser-parallelism")) {
+        cout << "Deserialization Parallelism "
+             << vm["deser-parallelism"].as<int>() << ".\n";
+        env.deser_parallelism = vm["deser-parallelism"].as<int>();
+    }
 
     //create schema
     std::vector<std::tuple<std::string, std::string, int>> schema;
@@ -111,7 +119,6 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     schema.emplace_back("l_extendedprice", "DOUBLE", 8);
     schema.emplace_back("l_discount", "DOUBLE", 8);
     schema.emplace_back("l_tax", "DOUBLE", 8);
-
 
     env.schema = schema;
     return env;
@@ -125,7 +132,7 @@ int main(int argc, char *argv[]) {
 
     auto start = std::chrono::steady_clock::now();
     string op = "";
-    //TODO: benchmark all baselines libpq, libpqxx, csv, binary etc
+    //TODO: Refactor legacy benchmarks to different module
     switch (option) {
 
         case 1:

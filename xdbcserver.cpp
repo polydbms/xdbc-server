@@ -134,14 +134,14 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
                 bufferId = minBId;
 
                 loops++;
-                if (loops == 1000000) {
+                /*if (loops == 1000000) {
                     loops = 0;
                     spdlog::get("XDBC.SERVER")->warn(
                             "Send thread {0} stuck in send at buffer: {1}, threadSentBuffs/totalSentBuffs: {2}/{3}, totalReadBuffs: {4} ",
                             thr, bufferId, threadSentBuffers, totalSentBuffers, dataReader.getTotalReadBuffers());
 
                     std::this_thread::sleep_for(xdbcEnv.sleep_time);
-                }
+                }*/
                 if (!hasUnsent(dataReader, minBId, maxBId)) {
                     spdlog::get("XDBC.SERVER")->warn("Send thread {0} exiting unexpectedly", thr);
                     cont = false;
@@ -275,7 +275,7 @@ int XDBCServer::serve(int parallelism) {
     spdlog::get("XDBC.SERVER")->info("Created {0} read threads", xdbcEnv.system);
 
     while (ds->getTotalReadBuffers() == 0) {
-        std::this_thread::sleep_for(xdbcEnv.sleep_time);
+        //std::this_thread::sleep_for(xdbcEnv.sleep_time);
     }
 
     for (int i = 0; i < parallelism; i++) {
