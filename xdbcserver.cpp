@@ -203,7 +203,7 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
             head.compressionType = compId;
             head.totalSize = totalSize;
             head.intermediateFormat = static_cast<size_t>(xdbcEnv.iformat);
-            head.crc = compute_crc(bp[bufferId].data(), totalSize);
+            //head.crc = compute_crc(bp[bufferId].data(), totalSize);
             head.attributeComp;
 
 
@@ -274,9 +274,6 @@ int XDBCServer::serve(int parallelism) {
 
     spdlog::get("XDBC.SERVER")->info("Created {0} read threads", xdbcEnv.system);
 
-    while (ds->getTotalReadBuffers() == 0) {
-        //std::this_thread::sleep_for(xdbcEnv.sleep_time);
-    }
 
     for (int i = 0; i < parallelism; i++) {
         threads[i] = std::thread(&XDBCServer::send, this, i, std::ref(*ds));

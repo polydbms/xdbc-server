@@ -39,6 +39,12 @@ struct shortLineitemColBatch {
     std::vector<double> l_discount;
     std::vector<double> l_tax;
 };
+
+struct SchemaAttribute {
+    std::string name;
+    std::string tpe;
+    int size;
+};
 struct RuntimeEnv {
     std::string compression_algorithm;
     int iformat;
@@ -53,7 +59,7 @@ struct RuntimeEnv {
     std::vector<std::atomic<int>> *flagArrPtr;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
-    std::vector<std::tuple<std::string, std::string, int>> schema;
+    std::vector<SchemaAttribute> schema;
 };
 
 class DataSource {
@@ -72,9 +78,9 @@ public:
 
     double double_swap(double d);
 
-    std::string formatSchema(const std::vector<std::tuple<std::string, std::string, int>> &schema);
+    std::string formatSchema(const std::vector<SchemaAttribute> &schema);
 
-    std::string getAttributesAsStr(const std::vector<std::tuple<std::string, std::string, int>> &schema);
+    std::string getAttributesAsStr(const std::vector<SchemaAttribute> &schema);
 
 private:
     std::atomic<bool> finishedReading;

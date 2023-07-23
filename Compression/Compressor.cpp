@@ -223,7 +223,7 @@ size_t Compressor::compress_zlib(void *data, size_t size) {
 
 std::array<size_t, MAX_ATTRIBUTES>
 Compressor::compress_buffer(const std::string &method, void *data, size_t size, size_t buff_size,
-                            const std::vector<std::tuple<std::string, std::string, int>> &schema) {
+                            const std::vector<SchemaAttribute> &schema) {
 
 
     //1 zstd
@@ -342,7 +342,7 @@ size_t compressDoubleColumn(const double *in, void *out, size_t size) {
 }
 
 std::array<size_t, MAX_ATTRIBUTES> Compressor::compress_cols(void *data, size_t size, size_t buff_size,
-                                                             const std::vector<std::tuple<std::string, std::string, int>> &schema) {
+                                                             const std::vector<SchemaAttribute> &schema) {
 
     std::array<size_t, MAX_ATTRIBUTES> compressedColumns{};
 
@@ -355,21 +355,19 @@ std::array<size_t, MAX_ATTRIBUTES> Compressor::compress_cols(void *data, size_t 
 
     int bytesWritten = 0;
     for (const auto &attribute: schema) {
-        const std::string &attributeType = std::get<1>(attribute);
-        int attributeSize = std::get<2>(attribute);
 
         //spdlog::get("XDBC.SERVER")->warn("handling attribute: {0} with attributeNum: {1}", std::get<0>(attribute), attributeNum);
         size_t compressedDataSize = 0;
-        if (attributeType == "INT") {
+        if (attribute.tpe == "INT") {
             uint32_t *decompressedPtr = reinterpret_cast<uint32_t *>(reinterpret_cast<std::byte *>(data) +
                                                                      buff_size * bytesWritten);
             size_t compressedDataSizeElements = compressIntColumn(decompressedPtr, compressedPtr, buff_size);
-            compressedDataSize = compressedDataSizeElements * attributeSize;
+            compressedDataSize = compressedDataSizeElements * attribute.size;
             bytesWritten += 4;
 
             //compressedDataSize += 4 * buffer_size;
             //spdlog::get("XDBC.SERVER")->warn("compressedDataSize: {0}, added {1} ", compressedDataSize, 4*buffer_size);
-        } else if (attributeType == "DOUBLE") {
+        } else if (attribute.tpe == "DOUBLE") {
             //TODO: refactor compress fpzip in other function
             double *decompressedPtr = reinterpret_cast<double *>(reinterpret_cast<std::byte *>(data) +
                                                                  buff_size * bytesWritten);

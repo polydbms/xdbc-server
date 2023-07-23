@@ -191,7 +191,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                                   if (xdbcEnv->iformat == 1)
                                       mv = bufferTupleId * (xdbcEnv->tuple_size);
                                   else if (xdbcEnv->iformat == 2)
-                                      mv = bufferTupleId * std::get<2>(xdbcEnv->schema[0]);
+                                      mv = bufferTupleId * xdbcEnv->schema[0].size;
 
                                   int ti = 0;
                                   int bytesInTuple = 0;
@@ -208,15 +208,13 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                                       } else if (xdbcEnv->iformat == 2) {
                                           writePtr =
                                                   bp[curBid].data() + bytesInTuple * xdbcEnv->buffer_size +
-                                                  bufferTupleId * std::get<2>(tuple);
+                                                  bufferTupleId * xdbcEnv->schema[0].size;
                                       }
 
-                                      if (std::get<1>(tuple) == "INT") {
+                                      if (tuple.tpe == "INT") {
                                           memcpy(writePtr, &block[ti]->As<ColumnInt32>()->At(i), 4);
 
-                                      }
-
-                                      if (std::get<1>(tuple) == "DOUBLE") {
+                                      } else if (tuple.tpe == "DOUBLE") {
 
                                           // TODO: fix decimal/double column
                                           auto col = block[ti]->As<ColumnDecimal>();
@@ -226,7 +224,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
                                       }
                                       ti++;
-                                      bytesInTuple += std::get<2>(tuple);
+                                      bytesInTuple += tuple.size;
                                   }
 
                                   totalThreadWrittenTuples++;
@@ -263,7 +261,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                     if (xdbcEnv->iformat == 1) {
                         writePtr = bp[curBid].data() + bufferTupleId * xdbcEnv->tuple_size;
                     } else if (xdbcEnv->iformat == 2) {
-                        writePtr = bp[curBid].data() + bufferTupleId * std::get<2>(xdbcEnv->schema[0]);
+                        writePtr = bp[curBid].data() + bufferTupleId * xdbcEnv->schema[0].size;
                     }
 
                     memcpy(writePtr, &mone, 4);

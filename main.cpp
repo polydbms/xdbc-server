@@ -6,11 +6,20 @@
 #include <chrono>
 #include <thread>
 #include <boost/program_options.hpp>
+#include <utility>
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
 using namespace std;
 namespace po = boost::program_options;
+
+SchemaAttribute createSchemaAttribute(std::string name, std::string tpe, int size) {
+    SchemaAttribute att;
+    att.name = std::move(name);
+    att.tpe = std::move(tpe);
+    att.size = size;
+    return att;
+}
 
 RuntimeEnv handleCMDParams(int ac, char *av[]) {
     // Declare the supported options.
@@ -110,15 +119,15 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     }
 
     //create schema
-    std::vector<std::tuple<std::string, std::string, int>> schema;
-    schema.emplace_back("l_orderkey", "INT", 4);
-    schema.emplace_back("l_partkey", "INT", 4);
-    schema.emplace_back("l_suppkey", "INT", 4);
-    schema.emplace_back("l_linenumber", "INT", 4);
-    schema.emplace_back("l_quantity", "DOUBLE", 8);
-    schema.emplace_back("l_extendedprice", "DOUBLE", 8);
-    schema.emplace_back("l_discount", "DOUBLE", 8);
-    schema.emplace_back("l_tax", "DOUBLE", 8);
+    std::vector<SchemaAttribute> schema;
+    schema.emplace_back(createSchemaAttribute("l_orderkey", "INT", 4));
+    schema.emplace_back(createSchemaAttribute("l_partkey", "INT", 4));
+    schema.emplace_back(createSchemaAttribute("l_suppkey", "INT", 4));
+    schema.emplace_back(createSchemaAttribute("l_linenumber", "INT", 4));
+    schema.emplace_back(createSchemaAttribute("l_quantity", "DOUBLE", 8));
+    schema.emplace_back(createSchemaAttribute("l_extendedprice", "DOUBLE", 8));
+    schema.emplace_back(createSchemaAttribute("l_discount", "DOUBLE", 8));
+    schema.emplace_back(createSchemaAttribute("l_tax", "DOUBLE", 8));
 
     env.schema = schema;
     return env;
