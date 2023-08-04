@@ -30,7 +30,7 @@ FIND_PACKAGE_HANDLE_STANDARD_ARGS(
 
 if (NOT CITYHASH_FOUND)
     message(STATUS "Using third-party bundled CityHash")
-else()
+else ()
     message(STATUS "Found CITYHASH: ${CITYHASH_LIBRARIES}")
 endif (NOT CITYHASH_FOUND)
 
@@ -46,7 +46,7 @@ SET(USED_LIBS ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_PROGRAM_OP
 
 #add_definitions(-DUSE_SYSTEM_ABSEIL=OFF)
 #add_executable(${PROJECT_NAME} main.cpp pg.cpp ch.cpp pgserver.cpp compresslibs.cpp compresslibs.h)
-add_executable(${PROJECT_NAME} main.cpp pg.cpp ch.cpp xdbcserver.cpp Compression/Compressor.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/DataSource.cpp)
+add_executable(${PROJECT_NAME} main.cpp pg.cpp ch.cpp xdbcserver.cpp Compression/Compressor.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/DataSource.cpp)
 #add_library(clickhouse-cpp SHARED IMPORTED)
 #set_property(TARGET clickhouse-cpp PROPERTY IMPORTED_LOCATION "/usr/local/lib/libclickhouse-cpp-lib.so")
 target_link_libraries(${PROJECT_NAME} PRIVATE clickhouse-cpp-lib -lpqxx -lpq ${USED_LIBS} lzo2 lz4 cityhash spdlog::spdlog ZLIB::ZLIB FastPFOR::FastPFOR ${FPZIP_LIBRARY})
