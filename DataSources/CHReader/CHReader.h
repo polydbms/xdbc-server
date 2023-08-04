@@ -29,7 +29,6 @@ private:
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;
     std::vector<std::vector<std::byte>> &bp;
-    std::vector<std::atomic<int>> &flagArr;
     RuntimeEnv *xdbcEnv;
     std::string tableName;
     std::stack<struct Part> partStack;

@@ -11,15 +11,6 @@
 
 #include "DataSources/PGReader/PGReader.h"
 
-//TODO: deprecate constants as they are declared now in xdbcEnv
-//#define TOTAL_TUPLES 10000000
-//#define BUFFER_SIZE 1000
-//#define BUFFERPOOL_SIZE 1000
-//#define TUPLE_SIZE 48
-//#define PARALLELISM 4
-//#define SLEEP_TIME 2ms
-
-
 using namespace boost::asio;
 using ip::tcp;
 
@@ -43,12 +34,10 @@ public:
 
     int send(int threadno, DataSource &dataReader);
 
-    bool hasUnsent(DataSource &dataReader, int minBid, int maxBid);
-
 private:
     RuntimeEnv xdbcEnv;
     std::vector<std::vector<std::byte>> bp;
-    std::vector<std::atomic<int>> flagArr;
+    //std::vector<std::atomic<int>> flagArr;
     std::atomic<int> totalSentBuffers;
     std::string tableName;
 

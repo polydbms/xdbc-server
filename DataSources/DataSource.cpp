@@ -4,7 +4,7 @@
 DataSource::DataSource(RuntimeEnv &xdbcEnv, std::string tableName) :
         xdbcEnv(&xdbcEnv),
         tableName(std::move(tableName)),
-        flagArr(*xdbcEnv.flagArrPtr),
+        //flagArr(*xdbcEnv.flagArrPtr),
         bp(*xdbcEnv.bpPtr),
         totalReadBuffers(0),
         finishedReading(false) {

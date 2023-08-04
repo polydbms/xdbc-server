@@ -16,7 +16,6 @@ using ip::tcp;
 
 CHReader::CHReader(RuntimeEnv &xdbcEnv, const std::string tableName) :
         DataSource(xdbcEnv, tableName),
-        flagArr(*xdbcEnv.flagArrPtr),
         bp(*xdbcEnv.bpPtr),
         totalReadBuffers(0),
         finishedReading(false),
@@ -136,8 +135,9 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
     Client client(ClientOptions().SetHost("ch").SetPort(9000));
 
-    int curBid = minBId;
+    int curBid = xdbcEnv->writeBufferPtr[thr]->pop();
     int bufferTupleId = 0;
+    int sendQueueId = 0;
 
     while (true) {
         std::unique_lock<std::mutex> lock(partStackMutex);
@@ -162,59 +162,33 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
             /*std::string qStr = "SELECT rowNumberInAllBlocks() as row_no,* FROM " + tableName +
                                " WHERE row_no >= " + to_string(from) +
                                " AND row_no < " + to_string(to) + " ORDER BY l_orderkey";*/
+            int schemaSize = xdbcEnv->schema.size();
 
             client.Select(qStr,
-                          [this, &curBid, &totalThreadWrittenBuffers, &bufferTupleId, &totalThreadWrittenTuples, &maxBId, &minBId, &thr](
+                          [this, &curBid, &totalThreadWrittenBuffers, &bufferTupleId, &totalThreadWrittenTuples, &sendQueueId, &thr, &schemaSize](
                                   const Block &block) {
 
+
                               for (size_t i = 0; i < block.GetRowCount(); i++) {
-                                  int sleepCtr = 0;
-                                  while (flagArr[curBid] == 0) {
-                                      curBid++;
-                                      if (curBid == maxBId) {
-                                          curBid = minBId;
-                                      }
-
-                                      if (sleepCtr == 1000) {
-                                          sleepCtr = 0;
-                                          spdlog::get("XDBC.SERVER")->warn(
-                                                  "CH thread {0}: Stuck at buffer {1} not ready to be written at tuple {2}. Total read buffers: {3}",
-                                                  thr, curBid, totalThreadWrittenBuffers, totalReadBuffers);
-
-                                      }
-                                      std::this_thread::sleep_for(xdbcEnv->sleep_time);
-                                      sleepCtr++;
-                                  }
-
-                                  int mv = 0;
-
-                                  if (xdbcEnv->iformat == 1)
-                                      mv = bufferTupleId * (xdbcEnv->tuple_size);
-                                  else if (xdbcEnv->iformat == 2)
-                                      mv = bufferTupleId * xdbcEnv->schema[0].size;
-
+                                  auto bpPtr = bp[curBid].data();
                                   int ti = 0;
                                   int bytesInTuple = 0;
 
-                                  for (auto it = xdbcEnv->schema.begin();
-                                       it != std::prev(xdbcEnv->schema.end()); ++it) {
-                                      const auto &tuple = *it;
+                                  for (int attPos = 0; attPos < schemaSize; attPos++) {
+                                      auto &attribute = xdbcEnv->schema[attPos];
 
                                       void *writePtr;
                                       if (xdbcEnv->iformat == 1) {
-                                          writePtr =
-                                                  bp[curBid].data() + bufferTupleId * xdbcEnv->tuple_size +
-                                                  bytesInTuple;
+                                          writePtr = bpPtr + bufferTupleId * xdbcEnv->tuple_size + bytesInTuple;
                                       } else if (xdbcEnv->iformat == 2) {
-                                          writePtr =
-                                                  bp[curBid].data() + bytesInTuple * xdbcEnv->buffer_size +
-                                                  bufferTupleId * xdbcEnv->schema[0].size;
+                                          writePtr = bpPtr + bytesInTuple * xdbcEnv->buffer_size +
+                                                     bufferTupleId * attribute.size;
                                       }
 
-                                      if (tuple.tpe == "INT") {
+                                      if (attribute.tpe == "INT") {
                                           memcpy(writePtr, &block[ti]->As<ColumnInt32>()->At(i), 4);
 
-                                      } else if (tuple.tpe == "DOUBLE") {
+                                      } else if (attribute.tpe == "DOUBLE") {
 
                                           // TODO: fix decimal/double column
                                           auto col = block[ti]->As<ColumnDecimal>();
@@ -224,7 +198,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
                                       }
                                       ti++;
-                                      bytesInTuple += tuple.size;
+                                      bytesInTuple += attribute.size;
                                   }
 
                                   totalThreadWrittenTuples++;
@@ -233,14 +207,15 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                                   if (bufferTupleId == xdbcEnv->buffer_size) {
                                       //cout << "wrote buffer " << bufferId << endl;
                                       bufferTupleId = 0;
-                                      flagArr[curBid] = 0;
 
-                                      totalReadBuffers.fetch_add(1);
+                                      //totalReadBuffers.fetch_add(1);
                                       totalThreadWrittenBuffers++;
-                                      curBid++;
+                                      xdbcEnv->sendBufferPtr[sendQueueId]->push(curBid);
+                                      sendQueueId++;
+                                      if (sendQueueId == xdbcEnv->network_parallelism)
+                                          sendQueueId = 0;
 
-                                      if (curBid == maxBId)
-                                          curBid = minBId;
+                                      curBid = xdbcEnv->writeBufferPtr[thr]->pop();
 
                                   }
                               }
@@ -267,7 +242,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                     memcpy(writePtr, &mone, 4);
                 }
 
-                flagArr[curBid] = 0;
+                xdbcEnv->sendBufferPtr[sendQueueId]->push(curBid);
                 totalReadBuffers.fetch_add(1);
                 totalThreadWrittenBuffers++;
             }
@@ -278,5 +253,8 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
         }
 
     }
+    for (int i = 0; i < xdbcEnv->network_parallelism; i++)
+        xdbcEnv->sendBufferPtr[i]->push(-1);
+
     return 1;
 }

@@ -5,6 +5,7 @@
 #include <atomic>
 #include <vector>
 #include <chrono>
+#include "../queue.h"
 
 //#define BUFFER_SIZE 1000
 //#define BUFFERPOOL_SIZE 1000
@@ -45,6 +46,8 @@ struct SchemaAttribute {
     std::string tpe;
     int size;
 };
+typedef std::shared_ptr<queue<int>> FBQ_ptr;
+
 struct RuntimeEnv {
     std::string compression_algorithm;
     int iformat;
@@ -56,7 +59,9 @@ struct RuntimeEnv {
     int read_partitions;
     int deser_parallelism;
     int network_parallelism;
-    std::vector<std::atomic<int>> *flagArrPtr;
+    //std::vector<std::atomic<int>> *flagArrPtr;
+    std::vector<FBQ_ptr> writeBufferPtr;
+    std::vector<FBQ_ptr> sendBufferPtr;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
     std::vector<SchemaAttribute> schema;
@@ -86,7 +91,6 @@ private:
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;
     std::vector<std::vector<std::byte>> &bp;
-    std::vector<std::atomic<int>> &flagArr;
     RuntimeEnv *xdbcEnv;
     std::string tableName;
 
