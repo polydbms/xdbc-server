@@ -371,11 +371,13 @@ std::array<size_t, MAX_ATTRIBUTES> Compressor::compress_cols(void *data, size_t 
             //TODO: refactor compress fpzip in other function
             double *decompressedPtr = reinterpret_cast<double *>(reinterpret_cast<std::byte *>(data) +
                                                                  buff_size * bytesWritten);
+
+            //compressedDataSize = compress_zstd(decompressedPtr, compressedPtr, buff_size * 8);
             compressedDataSize = compressDoubleColumn(decompressedPtr, compressedPtr, buff_size);
             bytesWritten += 8;
 
             //auto startPtr = reinterpret_cast<double *>(data) + buff_size * attributeNum;
-            //compressedDataSize = compress_zstd(decompressedPtr, compressedPtr, buff_size * 8);
+
 
             //compressedDataSize += 8 * buffer_size;
         }

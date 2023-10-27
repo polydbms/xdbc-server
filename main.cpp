@@ -61,60 +61,49 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     RuntimeEnv env;
 
     if (vm.count("system")) {
-        cout << "System "
-             << vm["system"].as<string>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("system: {0}", vm["system"].as<string>());
         env.system = vm["system"].as<string>();
     }
 
     if (vm.count("intermediate-format")) {
-        cout << "Intermediate format "
-             << vm["intermediate-format"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Intermediate format: {0}", vm["intermediate-format"].as<int>());
         env.iformat = vm["intermediate-format"].as<int>();
     }
 
     if (vm.count("compression-type")) {
-        cout << "Compression algorithm was set to "
-             << vm["compression-type"].as<string>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Compression algorithm: {0}", vm["compression-type"].as<string>());
         env.compression_algorithm = vm["compression-type"].as<string>();
     }
     if (vm.count("buffer-size")) {
-        cout << "Buffer-size: "
-             << vm["buffer-size"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Buffer-size: {0}", vm["buffer-size"].as<int>());
         env.buffer_size = vm["buffer-size"].as<int>();
     }
     if (vm.count("bufferpool-size")) {
-        cout << "Bufferpool-size: "
-             << vm["bufferpool-size"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Bufferpool-size: {0}", vm["bufferpool-size"].as<int>());
         env.bufferpool_size = vm["bufferpool-size"].as<int>();
     }
     if (vm.count("tuple-size")) {
-        cout << "Tuple-size "
-             << vm["tuple-size"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Tuple size: {0}", vm["tuple-size"].as<int>());
         env.tuple_size = vm["tuple-size"].as<int>();
     }
     if (vm.count("sleep-time")) {
-        cout << "Sleep-time "
-             << vm["sleep-time"].as<int>() << "ms.\n";
+        spdlog::get("XDBC.SERVER")->info("Sleep time: {0}ms", vm["sleep-time"].as<int>());
         env.sleep_time = std::chrono::milliseconds(vm["sleep-time"].as<int>());
     }
     if (vm.count("read-parallelism")) {
-        cout << "Read Parallelism "
-             << vm["read-parallelism"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Read parallelism: {0}", vm["read-parallelism"].as<int>());
         env.read_parallelism = vm["read-parallelism"].as<int>();
     }
     if (vm.count("read-partitions")) {
-        cout << "Read partitions "
-             << vm["read-partitions"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Read partitions: {0}", vm["read-partitions"].as<int>());
         env.read_partitions = vm["read-partitions"].as<int>();
     }
     if (vm.count("network-parallelism")) {
-        cout << "Network Parallelism "
-             << vm["network-parallelism"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Network parallelism: {0}", vm["network-parallelism"].as<int>());
         env.network_parallelism = vm["network-parallelism"].as<int>();
     }
     if (vm.count("deser-parallelism")) {
-        cout << "Deserialization Parallelism "
-             << vm["deser-parallelism"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Deserialization parallelism: {0}", vm["deser-parallelism"].as<int>());
         env.deser_parallelism = vm["deser-parallelism"].as<int>();
     }
 
@@ -134,6 +123,8 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
 }
 
 int main(int argc, char *argv[]) {
+
+    auto console = spdlog::stdout_color_mt("XDBC.SERVER");
 
     RuntimeEnv xdbcEnv = handleCMDParams(argc, argv);
 
@@ -162,9 +153,7 @@ int main(int argc, char *argv[]) {
             break;
         case 5: {
             op = "xdbc server";
-            auto console = spdlog::stdout_color_mt("XDBC.SERVER");
             XDBCServer xdbcserver = XDBCServer(xdbcEnv);
-
             xdbcserver.serve(xdbcEnv.network_parallelism);
             break;
         }

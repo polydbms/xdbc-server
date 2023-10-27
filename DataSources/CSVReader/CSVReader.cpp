@@ -15,7 +15,6 @@ static uintmax_t wc(char const *fname) {
     if (fd == -1)
         handle_error("open");
 
-    /* Advise the kernel of our access pattern.  */
     posix_fadvise(fd, 0, 0, 1);  // FDADVICE_SEQUENTIAL
 
     char buf[BUFFER_SIZE + 1];
@@ -268,7 +267,7 @@ int CSVReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &tota
                     auto &attribute = xdbcEnv->schema[attPos];
 
                     if (attPos < schemaSize - 1)
-                        endPtr = strchr(startPtr, '|');
+                        endPtr = strchr(startPtr, ',');
                     else
                         endPtr = strchr(startPtr, '\0');
 
