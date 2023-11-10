@@ -10,15 +10,29 @@ RUN apt-get upgrade -qy
 
 # install dependencies
 
-RUN apt install -qy clang libboost-all-dev cmake build-essential git
+RUN apt install -qy clang libboost-all-dev cmake build-essential git libspdlog-dev
 
-RUN git clone https://github.com/gabime/spdlog.git && cd spdlog && mkdir build && cd build &&  cmake .. && make -j && make install
+#RUN git clone https://github.com/gabime/spdlog.git && cd spdlog && mkdir build && cd build &&  cmake .. && make -j && make install
 
 # install compression libs
 
 RUN apt install -qy libzstd-dev liblzo2-dev liblz4-dev libsnappy-dev libbrotli-dev
 
-RUN git clone https://github.com/LLNL/zfp.git && cd zfp && make
+#RUN git clone https://github.com/LLNL/zfp.git && cd zfp && make
+
+RUN git clone https://github.com/lemire/FastPFor.git && cd FastPFor && \
+    mkdir build && \
+    cd build && \
+    cmake .. && \
+    cmake --build . && \
+    make install
+
+RUN git clone https://github.com/LLNL/fpzip.git && cd fpzip && \
+    mkdir build && \
+    cd build && \
+    cmake .. && \
+    cmake --build . --config Release && \
+    make install
 
 # install postgres dependencies
 

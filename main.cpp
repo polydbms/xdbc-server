@@ -6,11 +6,20 @@
 #include <chrono>
 #include <thread>
 #include <boost/program_options.hpp>
+#include <utility>
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
 using namespace std;
 namespace po = boost::program_options;
+
+SchemaAttribute createSchemaAttribute(std::string name, std::string tpe, int size) {
+    SchemaAttribute att;
+    att.name = std::move(name);
+    att.tpe = std::move(tpe);
+    att.size = size;
+    return att;
+}
 
 RuntimeEnv handleCMDParams(int ac, char *av[]) {
     // Declare the supported options.
@@ -20,7 +29,7 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
             ("system,y", po::value<string>()->default_value("postgres"),
              "Set system: \nDefault:\n  postgres\nOther:\n  clickhouse")
             ("compression-type,c", po::value<string>()->default_value("nocomp"),
-             "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4\n zlib")
+             "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4\n zlib\n cols")
             ("intermediate-format,f", po::value<int>()->default_value(1),
              "Set intermediate-format: \nDefault:\n  1 (row)\nOther:\n  2 (col)")
             ("buffer-size,b", po::value<int>()->default_value(1000),
@@ -30,8 +39,14 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
             ("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
             ("sleep-time,s", po::value<int>()->default_value(5), "Set a sleep-time in milli seconds.\nDefault: 5ms")
             ("read-parallelism,rp", po::value<int>()->default_value(4), "Set the read parallelism grade.\nDefault: 4")
+            ("read-partitions,rpp", po::value<int>()->default_value(4),
+             "Set the number of read partitions.\nDefault: 4")
+            ("deser-parallelism,dp", po::value<int>()->default_value(4),
+             "Set the number of deserialization parallelism.\nDefault: 4")
             ("network-parallelism,np", po::value<int>()->default_value(4),
-             "Set the send parallelism grade.\nDefault: 4");
+             "Set the send parallelism grade.\nDefault: 4")
+            ("compression-parallelism,cp", po::value<int>()->default_value(1),
+             "Set the compression parallelism grade.\nDefault: 1");
 
     po::positional_options_description p;
     p.add("compression-type", 1);
@@ -48,57 +63,74 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     RuntimeEnv env;
 
     if (vm.count("system")) {
-        cout << "System "
-             << vm["system"].as<string>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("system: {0}", vm["system"].as<string>());
         env.system = vm["system"].as<string>();
     }
 
     if (vm.count("intermediate-format")) {
-        cout << "Intermediate format "
-             << vm["intermediate-format"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Intermediate format: {0}", vm["intermediate-format"].as<int>());
         env.iformat = vm["intermediate-format"].as<int>();
     }
 
     if (vm.count("compression-type")) {
-        cout << "Compression algorithm was set to "
-             << vm["compression-type"].as<string>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Compression algorithm: {0}", vm["compression-type"].as<string>());
         env.compression_algorithm = vm["compression-type"].as<string>();
     }
     if (vm.count("buffer-size")) {
-        cout << "Buffer-size: "
-             << vm["buffer-size"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Buffer-size: {0}", vm["buffer-size"].as<int>());
         env.buffer_size = vm["buffer-size"].as<int>();
     }
     if (vm.count("bufferpool-size")) {
-        cout << "Bufferpool-size: "
-             << vm["bufferpool-size"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Bufferpool-size: {0}", vm["bufferpool-size"].as<int>());
         env.bufferpool_size = vm["bufferpool-size"].as<int>();
     }
     if (vm.count("tuple-size")) {
-        cout << "Tuple-size "
-             << vm["tuple-size"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Tuple size: {0}", vm["tuple-size"].as<int>());
         env.tuple_size = vm["tuple-size"].as<int>();
     }
     if (vm.count("sleep-time")) {
-        cout << "Sleep-time "
-             << vm["sleep-time"].as<int>() << "ms.\n";
+        spdlog::get("XDBC.SERVER")->info("Sleep time: {0}ms", vm["sleep-time"].as<int>());
         env.sleep_time = std::chrono::milliseconds(vm["sleep-time"].as<int>());
     }
     if (vm.count("read-parallelism")) {
-        cout << "Read Parallelism "
-             << vm["read-parallelism"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Read parallelism: {0}", vm["read-parallelism"].as<int>());
         env.read_parallelism = vm["read-parallelism"].as<int>();
     }
+    if (vm.count("read-partitions")) {
+        spdlog::get("XDBC.SERVER")->info("Read partitions: {0}", vm["read-partitions"].as<int>());
+        env.read_partitions = vm["read-partitions"].as<int>();
+    }
     if (vm.count("network-parallelism")) {
-        cout << "Network Parallelism "
-             << vm["network-parallelism"].as<int>() << ".\n";
+        spdlog::get("XDBC.SERVER")->info("Network parallelism: {0}", vm["network-parallelism"].as<int>());
         env.network_parallelism = vm["network-parallelism"].as<int>();
     }
+    if (vm.count("deser-parallelism")) {
+        spdlog::get("XDBC.SERVER")->info("Deserialization parallelism: {0}", vm["deser-parallelism"].as<int>());
+        env.deser_parallelism = vm["deser-parallelism"].as<int>();
+    }
+    if (vm.count("compression-parallelism")) {
+        spdlog::get("XDBC.SERVER")->info("Compression parallelism: {0}", vm["compression-parallelism"].as<int>());
+        env.compression_parallelism = vm["compression-parallelism"].as<int>();
+    }
 
+    //create schema
+    std::vector<SchemaAttribute> schema;
+    schema.emplace_back(createSchemaAttribute("l_orderkey", "INT", 4));
+    schema.emplace_back(createSchemaAttribute("l_partkey", "INT", 4));
+    schema.emplace_back(createSchemaAttribute("l_suppkey", "INT", 4));
+    schema.emplace_back(createSchemaAttribute("l_linenumber", "INT", 4));
+    schema.emplace_back(createSchemaAttribute("l_quantity", "DOUBLE", 8));
+    schema.emplace_back(createSchemaAttribute("l_extendedprice", "DOUBLE", 8));
+    schema.emplace_back(createSchemaAttribute("l_discount", "DOUBLE", 8));
+    schema.emplace_back(createSchemaAttribute("l_tax", "DOUBLE", 8));
+
+    env.schema = schema;
     return env;
 }
 
 int main(int argc, char *argv[]) {
+
+    auto console = spdlog::stdout_color_mt("XDBC.SERVER");
 
     RuntimeEnv xdbcEnv = handleCMDParams(argc, argv);
 
@@ -106,7 +138,7 @@ int main(int argc, char *argv[]) {
 
     auto start = std::chrono::steady_clock::now();
     string op = "";
-    //TODO: benchmark all baselines libpq, libpqxx, csv, binary etc
+    //TODO: Refactor legacy benchmarks to different module
     switch (option) {
 
         case 1:
@@ -127,10 +159,8 @@ int main(int argc, char *argv[]) {
             break;
         case 5: {
             op = "xdbc server";
-            auto console = spdlog::stdout_color_mt("XDBC.SERVER");
             XDBCServer xdbcserver = XDBCServer(xdbcEnv);
-
-            xdbcserver.serve(xdbcEnv.network_parallelism);
+            xdbcserver.serve();
             break;
         }
         case 6: {

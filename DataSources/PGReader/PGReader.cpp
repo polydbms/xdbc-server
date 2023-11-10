@@ -7,35 +7,82 @@
 #include <chrono>
 #include <thread>
 #include "spdlog/spdlog.h"
-
+#include <stack>
+#include "../fast_float.h"
+#include <charconv>
 
 using namespace std;
 using namespace pqxx;
 using namespace boost::asio;
 using ip::tcp;
 
+std::vector<std::string> splitStr(std::string const &original, char separator) {
+    std::vector<std::string> results;
+    std::string::const_iterator start = original.begin();
+    std::string::const_iterator end = original.end();
+    std::string::const_iterator next = std::find(start, end, separator);
+    while (next != end) {
+        results.emplace_back(start, next);
+        start = next + 1;
+        next = std::find(start, end, separator);
+    }
+    results.emplace_back(start, next);
+    return results;
+}
+
+int fast_atoi(const char *str) {
+    int val = 0;
+    while (*str) {
+        val = val * 10 + (*str++ - '0');
+    }
+    return val;
+}
+
+unsigned int naive(const char *p) {
+    unsigned int x = 0;
+    while (*p != '\0') {
+        x = (x * 10) + (*p - '0');
+        ++p;
+    }
+    return x;
+}
+
+enum STR2INT_ERROR {
+    SUCCESS, OVERFLOW, UNDERFLOW, INCONVERTIBLE
+};
+
+STR2INT_ERROR str2int(int &i, char const *s, int base = 0) {
+    char *end;
+    long l;
+    errno = 0;
+    l = strtol(s, &end, base);
+    if ((errno == ERANGE && l == LONG_MAX) || l > INT_MAX) {
+        return OVERFLOW;
+    }
+    if ((errno == ERANGE && l == LONG_MIN) || l < INT_MIN) {
+        return UNDERFLOW;
+    }
+    if (*s == '\0' || *end != '\0') {
+        return INCONVERTIBLE;
+    }
+    i = l;
+    return SUCCESS;
+}
 
 PGReader::PGReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
         DataSource(xdbcEnv, tableName),
-        flagArr(*xdbcEnv.flagArrPtr),
+        //flagArr(*xdbcEnv.flagArrPtr),
         bp(*xdbcEnv.bpPtr),
         totalReadBuffers(0),
         finishedReading(false),
         xdbcEnv(&xdbcEnv),
         tableName(tableName),
-        schema() {
+        partStack(),
+        partStackMutex(),
+        qs() {
 
-    // TODO: move schema creation somewhere else
-    schema.emplace_back("l_orderkey", "INT", 4);
-    schema.emplace_back("l_partkey", "INT", 4);
-    schema.emplace_back("l_suppkey", "INT", 4);
-    schema.emplace_back("l_linenumber", "INT", 4);
-    schema.emplace_back("l_quantity", "DOUBLE", 8);
-    schema.emplace_back("l_extendedprice", "DOUBLE", 8);
-    schema.emplace_back("l_discount", "DOUBLE", 8);
-    schema.emplace_back("l_tax", "DOUBLE", 8);
 
-    spdlog::get("XDBC.SERVER")->info("Table schema:\n{0}", formatSchema(schema));
+    spdlog::get("XDBC.SERVER")->info("PG Reader, table schema:\n{0}", formatSchema(xdbcEnv.schema));
 }
 
 int PGReader::getTotalReadBuffers() const {
@@ -130,7 +177,7 @@ int PGReader::read_pqxx_stream() {
         if (bufferTupleId == xdbcEnv->buffer_size) {
             //cout << "wrote buffer " << bufferId << endl;
             bufferTupleId = 0;
-            flagArr[bufferId] = 0;
+            //flagArr[bufferId] = 0;
 
             bufferId++;
 
@@ -220,7 +267,7 @@ int PGReader::read_pq_exec() {
                     stod(PQgetvalue(res, i, l7_fnum))
     };*/
         int sleepCtr = 0;
-        while (flagArr[bufferId] == 0) {
+        /*while (flagArr[bufferId] == 0) {
             if (sleepCtr == 1000) {
                 sleepCtr = 0;
                 cout << "Read: Stuck at buffer " << bufferId << " not ready to be written at tuple " << totalCnt
@@ -228,7 +275,7 @@ int PGReader::read_pq_exec() {
             }
             //std::this_thread::sleep_for(SLEEP_TIME);
             sleepCtr++;
-        }
+        }*/
 
         //TODO: fix dynamic schema
         int mv = bufferTupleId;
@@ -265,7 +312,7 @@ int PGReader::read_pq_exec() {
         if (bufferTupleId == xdbcEnv->buffer_size) {
             //cout << "wrote buffer " << bufferId << endl;
             bufferTupleId = 0;
-            flagArr[bufferId] = 0;
+            //flagArr[bufferId] = 0;
 
             bufferId++;
 
@@ -285,45 +332,64 @@ int PGReader::read_pq_copy() {
     spdlog::get("XDBC.SERVER")->info("Using pglib with COPY, parallelism: {0}", xdbcEnv->read_parallelism);
     spdlog::get("XDBC.SERVER")->info("Using compression: {0}", xdbcEnv->compression_algorithm);
 
-    int threadWrittenTuples[xdbcEnv->read_parallelism];
-    int threadWrittenBuffers[xdbcEnv->read_parallelism];
-    thread threads[xdbcEnv->read_parallelism];
+    int threadWrittenTuples[xdbcEnv->deser_parallelism];
+    int threadWrittenBuffers[xdbcEnv->deser_parallelism];
+    thread readThreads[xdbcEnv->read_parallelism];
+    thread deSerThreads[xdbcEnv->deser_parallelism];
 
     // TODO: throw something when table does not exist
 
     int maxCtId = getMaxCtId(tableName);
 
-    //cout << "partitioning upper bound: " << maxCtId << endl;
-    div_t div1 = div(maxCtId, xdbcEnv->read_parallelism);
-    int partSize = div1.quot;
-    if (div1.rem > 0)
-        partSize += 1;
+    int partNum = xdbcEnv->read_partitions;
+    div_t partSizeDiv = div(maxCtId, partNum);
 
-    //cout << "starting threads" << endl;
-    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
+    int partSize = partSizeDiv.quot;
 
-        int startOff = i * partSize;
-        long endOff = ((i + 1) * partSize);
+    if (partSizeDiv.rem > 0)
+        partSize++;
 
-        if (i == xdbcEnv->read_parallelism - 1)
-            endOff = UINT32_MAX;
 
-        threads[i] = std::thread(&PGReader::pqWriteToBp,
-                                 this, i, startOff, endOff,
-                                 std::ref(threadWrittenTuples[i]), std::ref(threadWrittenBuffers[i])
-        );
-        threadWrittenTuples[i] = 0;
-        threadWrittenBuffers[i] = 0;
+    for (int i = partNum - 1; i >= 0; i--) {
+        Part p;
+        p.id = i;
+        p.startOff = i * partSize;
+        p.endOff = ((i + 1) * partSize);
+
+        if (i == partNum - 1)
+            p.endOff = UINT32_MAX;
+
+        partStack.push(p);
 
     }
 
-    //cout << "Read threads spawned" << endl;
+    //initialize deser queues
+    for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
+        Q_ptr q(new queue<vector<string>>);
+        qs.push_back(q);
+    }
+
+    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
+        readThreads[i] = std::thread(&PGReader::pqWriteToBp, this, i);
+    }
+
+
+    for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
+
+        threadWrittenTuples[i] = 0;
+        threadWrittenBuffers[i] = 0;
+        deSerThreads[i] = std::thread(&PGReader::writeTuplesToBp,
+                                      this, i, std::ref(threadWrittenTuples[i]), std::ref(threadWrittenBuffers[i]));
+    }
 
     int total = 0;
-    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
-        threads[i].join();
-
+    for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
+        deSerThreads[i].join();
         total += threadWrittenTuples[i];
+    }
+
+    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
+        readThreads[i].join();
     }
     finishedReading.store(true);
     totalCnt += total;
@@ -350,255 +416,275 @@ void PGReader::readData() {
     auto end = std::chrono::steady_clock::now();
     spdlog::get("XDBC.SERVER")->info("Read  | Elapsed time: {0} ms for #tuples: {1}",
                                      std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(),
-                                     totalCnt
-
-    );
+                                     totalCnt);
 
     //return 0;
 }
 
-int PGReader::pqWriteToBp(int thr, int from, long to, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers) {
+int
+PGReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers) {
 
-    int minBId = thr * (xdbcEnv->bufferpool_size / xdbcEnv->read_parallelism);
-    int maxBId = (thr + 1) * (xdbcEnv->bufferpool_size / xdbcEnv->read_parallelism);
-
-    spdlog::get("XDBC.SERVER")->info("PG thread {0} assigned ({1},{2})", thr, minBId, maxBId);
-
-    int curBid = minBId;
-    const char *conninfo;
-    PGconn *connection = NULL;
-    char *receiveBuffer = NULL;
-    int receiveLength = 0;
-    const int asynchronous = 0;
-    PGresult *res;
-
-    int bufferTupleId = 0;
-
-    // TODO: attention! `hostAddr` is for IPs while `host` is for hostnames, handle correctly
-    conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
-    connection = PQconnectdb(conninfo);
-    string toStr = std::to_string(to);
-    //check if last thread, then max range
-
-
-    std::string qStr =
-            "COPY (SELECT " + getAttributesAsStr(schema) + " FROM " + tableName + " WHERE ctid BETWEEN '(" +
-            std::to_string(from) + ",0)'::tid AND '(" +
-            std::to_string(to) + ",0)'::tid) TO STDOUT WITH (FORMAT text, DELIMITER '|')";
-
-    spdlog::get("XDBC.SERVER")->info("PG thread {0} runs query: {1}", thr, qStr);
-
-    res = PQexec(connection, qStr.c_str());
-    ExecStatusType resType = PQresultStatus(res);
-
-    if (resType == PGRES_COPY_OUT)
-        spdlog::get("XDBC.SERVER")->info("PG thread {0}: RESULT OK", thr);
-    else
-        spdlog::get("XDBC.SERVER")->error("PG thread {0}: RESULT of COPY is {1}", thr, resType);
-    //cout << "Thread " << thr << " Result of COPY is " << resType << endl;
-
-    receiveLength = PQgetCopyData(connection, &receiveBuffer, asynchronous);
-
-
+    //spdlog::get("XDBC.SERVER")->info("PG Deser thread {0} locking tuple", thr);
+    int emptyCtr = 0;
+    int schemaSize = xdbcEnv->schema.size();
+    int compQueueId = 0;
     char *endPtr;
     size_t len;
-    //cout << "Thread: " << thr << " pg rcv len = " << receiveLength << endl;
+    int celli = -1;
+    double celld = -1;
+    int bufferTupleId = 0;
+    const char *tmpPtr;
+    const char *tmpEnd;
+    char *startPtr;
 
+    while (emptyCtr < xdbcEnv->read_parallelism) {
 
-    while (receiveLength > 0) {
+        auto src = qs[thr]->pop();
+        if (src.empty())
+            emptyCtr++;
+        else {
 
-        //cout << "Thread: " << thr << " pg rcv len = " << receiveLength << endl;
-
-        int sleepCtr = 0;
-        while (flagArr[curBid] == 0) {
-            curBid++;
-            if (curBid == maxBId) {
-                curBid = minBId;
-            }
-
-            if (sleepCtr == 1000) {
-                sleepCtr = 0;
-                spdlog::get("XDBC.SERVER")->warn(
-                        "PG thread {0}: Stuck at buffer {1} not ready to be written at tuple {2}. Total read buffers: {3}",
-                        thr, curBid, totalThreadWrittenBuffers, totalReadBuffers);
-
-            }
-            std::this_thread::sleep_for(xdbcEnv->sleep_time);
-            sleepCtr++;
-        }
-
-        char *startPtr = receiveBuffer;
-        int mv = 0;
-
-        if (xdbcEnv->iformat == 1)
-            mv = bufferTupleId * (xdbcEnv->tuple_size);
-        else if (xdbcEnv->iformat == 2)
-            mv = bufferTupleId * std::get<2>(schema[0]);
-
-        for (auto it = schema.begin(); it != std::prev(schema.end()); ++it) {
-            const auto &tuple = *it;
-
-            endPtr = strchr(startPtr, '|');
-            len = endPtr - startPtr;
-            char tmp[len + 1];
-            memcpy(tmp, startPtr, len);
-            tmp[len] = '\0';
-            //l0 = stoi(tmp);
-            startPtr = endPtr + 1;
-
-            int celli = -1;
-            double celld = -1;
-
-
-            if (std::get<1>(tuple) == "INT") {
-                celli = stoi(tmp);
-                if (xdbcEnv->iformat == 1) {
-                    memcpy(bp[curBid].data() + mv, &celli, 4);
-                    mv += 4;
-                } else if (xdbcEnv->iformat == 2) {
-                    memcpy(bp[curBid].data() + mv, &celli, 4);
-                    mv += xdbcEnv->buffer_size * 4;
-                }
-            }
-
-            if (std::get<1>(tuple) == "DOUBLE") {
-                celld = stod(tmp);
-
-                if (xdbcEnv->iformat == 1) {
-                    memcpy(bp[curBid].data() + mv, &celld, 8);
-                    mv += 8;
-                } else if (xdbcEnv->iformat == 2) {
-                    memcpy(bp[curBid].data() + mv, &celld, 8);
-                    mv += xdbcEnv->buffer_size * 8;
-                }
-            }
-
-            //TODO: add more types
-
-        }
-
-        //handle last element after |
-        endPtr = strchr(startPtr, '\0');
-        len = endPtr - startPtr;
-        char tmp[len + 1];
-        memcpy(tmp, startPtr, len);
-        tmp[len] = '\0';
-
-        if (std::get<1>(schema.back()) == "INT") {
-            int last = stoi(tmp);
-            memcpy(bp[curBid].data() + mv, &last, 4);
-        }
-
-        if (std::get<1>(schema.back()) == "DOUBLE") {
-            double last = stod(tmp);
-            memcpy(bp[curBid].data() + mv, &last, 8);
-        }
-
-
-        //spdlog::get("XDBC.SERVER")->info("writing to {0},{1}: ", curBid, bufferTupleId);
-        //spdlog::get("XDBC.SERVER")->info("Thread {0} wrote tuple: {1}", thr, totalThreadWrittenTuples);
-
-        totalThreadWrittenTuples++;
-        bufferTupleId++;
-
-        if (bufferTupleId == xdbcEnv->buffer_size) {
-            //cout << "wrote buffer " << bufferId << endl;
             bufferTupleId = 0;
-            flagArr[curBid] = 0;
+            //int minBId = thr * (xdbcEnv->bufferpool_size / xdbcEnv->deser_parallelism);
+            //int maxBId = (thr + 1) * (xdbcEnv->bufferpool_size / xdbcEnv->deser_parallelism);
+            //int minBId = 0;
+            //int maxBId = xdbcEnv->bufferpool_size;
 
-            totalReadBuffers.fetch_add(1);
-            totalThreadWrittenBuffers++;
-            curBid++;
-
-            if (curBid == maxBId)
-                curBid = minBId;
-
-        }
+            /*spdlog::get("XDBC.SERVER")->info("PG Deser thread {0} assigned ({1},{2}), first tuple: {3}", thr, minBId,
+                                             maxBId, src[0]);*/
 
 
-        PQfreemem(receiveBuffer);
+            int curBid = xdbcEnv->writeBufferPtr[thr]->pop();
+            auto bpPtr = bp[curBid].data();
 
-        receiveLength = PQgetCopyData(connection, &receiveBuffer, asynchronous);
+            for (int i = 0; i < src.size(); i++) {
+                //spdlog::get("XDBC.SERVER")->info("PG Deser thread {0} processing {1}, tuple: {2}", thr, bufferTupleId, tuple);
 
-    }
+                startPtr = src[i].data();
 
-    //remaining tuples
-    if (totalReadBuffers > 0 && bufferTupleId != xdbcEnv->buffer_size) {
-        spdlog::get("XDBC.SERVER")->info("PG thread {0} has {1} remaining tuples",
-                                         thr, xdbcEnv->buffer_size - bufferTupleId);
+                int bytesInTuple = 0;
 
-        //TODO: remove dirty fix, potentially with buffer header or resizable buffers
-        int mone = -1;
-        double dmone = -1;
-        int mv = 0;
+                for (int attPos = 0; attPos < schemaSize; attPos++) {
 
-        for (int i = bufferTupleId; i < xdbcEnv->buffer_size; i++) {
+                    //spdlog::get("XDBC.SERVER")->info("PG Deser thread {0} processing schema", thr);
 
-            if (xdbcEnv->iformat == 1)
-                mv = bufferTupleId * (xdbcEnv->tuple_size);
-            if (xdbcEnv->iformat == 2)
-                mv = bufferTupleId * std::get<2>(schema[0]);
+                    auto &attribute = xdbcEnv->schema[attPos];
 
-            for (const auto &attribute: schema) {
-                /*spdlog::get("XDBC.SERVER")->info("thr {0} tuple attribute {1},{2},{3}", thr, std::get<0>(attribute),
-                                                 std::get<1>(attribute), std::get<2>(attribute));*/
-                if (std::get<1>(attribute) == "INT")
-                    memcpy(bp[curBid].data() + mv, &mone, 4);
+                    if (attPos < schemaSize - 1)
+                        endPtr = strchr(startPtr, '|');
+                    else
+                        endPtr = strchr(startPtr, '\0');
 
-                //spdlog::get("XDBC.SERVER")->info("thr {0} filled int", thr);
+                    len = endPtr - startPtr;
+                    //char tmp[len + 1];
+                    //memcpy(tmp, startPtr, len);
+                    //tmp[len] = '\0';
+                    std::string_view tmp(startPtr, len);
+                    tmpPtr = tmp.data();
+                    tmpEnd = tmpPtr + len;
+                    startPtr = endPtr + 1;
 
-                if (std::get<1>(attribute) == "DOUBLE")
-                    memcpy(bp[curBid].data() + mv, &dmone, 8);
+                    void *writePtr;
+                    if (xdbcEnv->iformat == 1) {
+                        writePtr = bpPtr + bufferTupleId * xdbcEnv->tuple_size + bytesInTuple;
+                    } else if (xdbcEnv->iformat == 2) {
+                        writePtr = bpPtr + bytesInTuple * xdbcEnv->buffer_size +
+                                   bufferTupleId * attribute.size;
+                    }
 
-                //spdlog::get("XDBC.SERVER")->info("thr {0} filled double", thr);
+                    if (attribute.tpe == "INT") {
+                        std::from_chars(tmpPtr, tmpEnd, celli);
+                        memcpy(writePtr, &celli, 4);
+                    } else if (attribute.tpe == "DOUBLE") {
+                        std::from_chars(tmpPtr, tmpEnd, celld);
+                        memcpy(writePtr, &celld, 8);
+                    }
 
-                if (xdbcEnv->iformat == 1)
-                    mv += std::get<2>(attribute);
+                    //TODO: add more types
+                    bytesInTuple += attribute.size;
+                }
+                //spdlog::get("XDBC.SERVER")->info("PG Deser thread {0} processed schema", thr);
 
-                if (xdbcEnv->iformat == 2)
-                    mv += xdbcEnv->buffer_size * std::get<2>(attribute);
+                totalThreadWrittenTuples++;
+                bufferTupleId++;
+
+                if (bufferTupleId == xdbcEnv->buffer_size) {
+
+                    bufferTupleId = 0;
+                    //flagArr[curBid].store(0);
+                    //totalReadBuffers.fetch_add(1);
+                    totalThreadWrittenBuffers++;
+                    xdbcEnv->compBufferPtr[compQueueId]->push(curBid);
+                    compQueueId++;
+                    if (compQueueId == xdbcEnv->compression_parallelism)
+                        compQueueId = 0;
+
+                    curBid = xdbcEnv->writeBufferPtr[thr]->pop();
+                    bpPtr = bp[curBid].data();
+                }
 
             }
-        }
 
-        flagArr[curBid] = 0;
-        totalReadBuffers.fetch_add(1);
-        totalThreadWrittenBuffers++;
-    } else
-        spdlog::get("XDBC.SERVER")->info("PG thread {0} has no remaining tuples", thr);
-    /* we now check the last received length returned by copy data */
-    if (receiveLength == 0) {
-        /* we cannot read more data without blocking */
-        spdlog::get("XDBC.SERVER")->warn("PG Reader received 0");
-    } else if (receiveLength == -1) {
-        /* received copy done message */
-        PGresult *result = PQgetResult(connection);
-        ExecStatusType resultStatus = PQresultStatus(result);
+            //remaining tuples
+            if (bufferTupleId > 0 && bufferTupleId != xdbcEnv->buffer_size) {
+                spdlog::get("XDBC.SERVER")->info("PG Deser thread {0} has {1} remaining tuples",
+                                                 thr, xdbcEnv->buffer_size - bufferTupleId);
 
-        if (resultStatus == PGRES_COMMAND_OK) {
-            spdlog::get("XDBC.SERVER")->info("PG thread {0} Copy finished", thr);
+                //TODO: remove dirty fix, potentially with buffer header or resizable buffers
+                int mone = -1;
 
-        } else {
-            spdlog::get("XDBC.SERVER")->warn("PG thread {0} Copy failed", thr);
-        }
+                for (int i = bufferTupleId; i < xdbcEnv->buffer_size; i++) {
 
-        PQclear(result);
-    } else if (receiveLength == -2) {
-        /* received an error */
-        spdlog::get("XDBC.SERVER")->warn("PG thread {0} Copy failed bc -2", thr);
-    }
+                    void *writePtr;
+                    if (xdbcEnv->iformat == 1) {
+                        writePtr = bpPtr + bufferTupleId * xdbcEnv->tuple_size;
+                    } else if (xdbcEnv->iformat == 2) {
+                        writePtr = bpPtr + bufferTupleId * xdbcEnv->schema[0].size;
+                    }
 
-    /* if copy out completed, make sure we drain all results from libpq */
-    if (receiveLength < 0) {
-        PGresult *result = PQgetResult(connection);
-        while (result != NULL) {
-            PQclear(result);
-            result = PQgetResult(connection);
+                    memcpy(writePtr, &mone, 4);
+                }
+
+                //spdlog::get("XDBC.SERVER")->info("thr {0} finished remaining", thr);
+                //totalReadBuffers.fetch_add(1);
+                xdbcEnv->compBufferPtr[compQueueId]->push(curBid);
+                totalThreadWrittenBuffers++;
+            }
+
+            /*else
+                spdlog::get("XDBC.SERVER")->info("PG thread {0} has no remaining tuples", thr);*/
+
+            /*spdlog::get("XDBC.SERVER")->info("PG Deser thread {0} wrote buffers: {1}, tuples {2}",
+                                             thr, totalThreadWrittenBuffers, totalThreadWrittenTuples);*/
+
         }
     }
-    spdlog::get("XDBC.SERVER")->info("PG thread {0} wrote buffers: {1}, tuples {2}",
-                                     thr, totalThreadWrittenBuffers, totalThreadWrittenTuples);
+
+    for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
+        xdbcEnv->compBufferPtr[i]->push(-1);
 
     return 1;
 }
 
+int PGReader::pqWriteToBp(int thr) {
+
+    const char *conninfo;
+    PGconn *connection = NULL;
+    // TODO: attention! `hostAddr` is for IPs while `host` is for hostnames, handle correctly
+    conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
+    connection = PQconnectdb(conninfo);
+    int vectorSize = xdbcEnv->buffer_size * 100;
+    vector<string> tuples(vectorSize);
+    std::unique_lock<std::mutex> lock(partStackMutex);
+    while (!partStack.empty()) {
+        tuples.resize(vectorSize);
+
+        Part part = partStack.top();
+        partStack.pop();
+        if (lock.owns_lock())
+            lock.unlock();
+
+        char *receiveBuffer = NULL;
+        int receiveLength = 0;
+        const int asynchronous = 0;
+        PGresult *res;
+        string toStr = std::to_string(part.endOff);
+
+        std::string qStr =
+                "COPY (SELECT " + getAttributesAsStr(xdbcEnv->schema) + " FROM " + tableName +
+                " WHERE ctid BETWEEN '(" +
+                std::to_string(part.startOff) + ",0)'::tid AND '(" +
+                std::to_string(part.endOff) + ",0)'::tid) TO STDOUT WITH (FORMAT text, DELIMITER '|')";
+
+        spdlog::get("XDBC.SERVER")->info("PG thread {0} runs query: {1}", thr, qStr);
+
+        res = PQexec(connection, qStr.c_str());
+        ExecStatusType resType = PQresultStatus(res);
+
+        if (resType != PGRES_COPY_OUT)
+            spdlog::get("XDBC.SERVER")->error("PG thread {0}: RESULT of COPY is {1}", thr, resType);
+
+        receiveLength = PQgetCopyData(connection, &receiveBuffer, asynchronous);
+
+        int tupleId = 0;
+        int lTupleId = 0;
+        int deserQ = 0;
+        spdlog::get("XDBC.SERVER")->error("PG thread {0}: Entering PQgetCopyData loop with rcvlen: {1}", thr,
+                                          receiveLength);
+        while (receiveLength > 0) {
+            //auto tmpTpl = new char[receiveLength];
+            //memcpy(tmpTpl, receiveBuffer, receiveLength);
+
+            tuples[lTupleId] = receiveBuffer;
+            tupleId++;
+            lTupleId++;
+            if (lTupleId == vectorSize) {
+                //vector<string> tpls(tuples);
+
+                qs[deserQ]->push(tuples);
+
+                deserQ++;
+                if (deserQ == xdbcEnv->deser_parallelism)
+                    deserQ = 0;
+
+
+                lTupleId = 0;
+            }
+
+
+            PQfreemem(receiveBuffer);
+            receiveLength = PQgetCopyData(connection, &receiveBuffer, asynchronous);
+        }
+        tuples.resize(lTupleId);
+        //handle last tuples
+        qs[deserQ]->push(tuples);
+
+        /*      std::unique_lock<std::mutex> lock2(tupleStackMutex);
+              tupleStack.push(tuples);
+              lock2.unlock();
+  */
+
+        spdlog::get("XDBC.SERVER")->error("PG thread {0}: Exiting PQgetCopyData loop, tupleNo: {1}", thr, tupleId);
+        /* we now check the last received length returned by copy data */
+        if (receiveLength == 0) {
+            /* we cannot read more data without blocking */
+            spdlog::get("XDBC.SERVER")->warn("PG Reader received 0");
+        } else if (receiveLength == -1) {
+            /* received copy done message */
+            PGresult *result = PQgetResult(connection);
+            ExecStatusType resultStatus = PQresultStatus(result);
+
+            if (resultStatus != PGRES_COMMAND_OK) {
+                spdlog::get("XDBC.SERVER")->warn("PG thread {0} Copy failed", thr);
+
+            }
+
+            PQclear(result);
+        } else if (receiveLength == -2) {
+            /* received an error */
+            spdlog::get("XDBC.SERVER")->warn("PG thread {0} Copy failed bc -2", thr);
+        } else if (receiveLength < 0) {
+            /* if copy out completed, make sure we drain all results from libpq */
+            PGresult *result = PQgetResult(connection);
+            while (result != NULL) {
+                PQclear(result);
+                result = PQgetResult(connection);
+            }
+        }
+
+
+    }
+    if (lock.owns_lock())
+        lock.unlock();
+
+    spdlog::get("XDBC.SERVER")->info("PG thread {0} exiting", thr);
+
+    PQfinish(connection);
+
+    vector<string> v;
+    for (const auto &q: qs) {
+        q->push(v);
+    }
+
+    return 1;
+}

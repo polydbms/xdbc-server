@@ -4,7 +4,7 @@
 DataSource::DataSource(RuntimeEnv &xdbcEnv, std::string tableName) :
         xdbcEnv(&xdbcEnv),
         tableName(std::move(tableName)),
-        flagArr(*xdbcEnv.flagArrPtr),
+        //flagArr(*xdbcEnv.flagArrPtr),
         bp(*xdbcEnv.bpPtr),
         totalReadBuffers(0),
         finishedReading(false) {
@@ -40,7 +40,7 @@ double DataSource::double_swap(double d) {
     return dest.d;
 }
 
-std::string DataSource::formatSchema(const std::vector<std::tuple<std::string, std::string, int>> &schema) {
+std::string DataSource::formatSchema(const std::vector<SchemaAttribute> &schema) {
     std::stringstream ss;
 
     // Header line
@@ -50,19 +50,19 @@ std::string DataSource::formatSchema(const std::vector<std::tuple<std::string, s
        << '\n';
 
     for (const auto &tuple: schema) {
-        ss << std::setw(20) << std::left << std::get<0>(tuple)
-           << std::setw(15) << std::left << std::get<1>(tuple)
-           << std::setw(10) << std::left << std::get<2>(tuple)
+        ss << std::setw(20) << std::left << tuple.name
+           << std::setw(15) << std::left << tuple.tpe
+           << std::setw(10) << std::left << tuple.size
            << '\n';
     }
 
     return ss.str();
 }
 
-std::string DataSource::getAttributesAsStr(const std::vector<std::tuple<std::string, std::string, int>> &schema) {
+std::string DataSource::getAttributesAsStr(const std::vector<SchemaAttribute> &schema) {
     std::string result;
     for (const auto &tuple: schema) {
-        result += std::get<0>(tuple) + ", ";
+        result += tuple.name + ", ";
     }
     if (!result.empty()) {
         result.erase(result.size() - 2); // Remove the trailing comma and space

@@ -5,11 +5,19 @@
 #include <atomic>
 #include <vector>
 #include <chrono>
+#include "../queue.h"
 
 //#define BUFFER_SIZE 1000
 //#define BUFFERPOOL_SIZE 1000
 //#define TUPLE_SIZE 48
 //#define SLEEP_TIME 5ms
+
+struct Part {
+    int id;
+    int startOff;
+    long endOff;
+};
+
 
 struct shortLineitem {
     int l_orderkey;
@@ -32,6 +40,14 @@ struct shortLineitemColBatch {
     std::vector<double> l_discount;
     std::vector<double> l_tax;
 };
+
+struct SchemaAttribute {
+    std::string name;
+    std::string tpe;
+    int size;
+};
+typedef std::shared_ptr<queue<int>> FBQ_ptr;
+
 struct RuntimeEnv {
     std::string compression_algorithm;
     int iformat;
@@ -40,10 +56,17 @@ struct RuntimeEnv {
     int tuple_size;
     std::chrono::milliseconds sleep_time;
     int read_parallelism;
+    int read_partitions;
+    int deser_parallelism;
     int network_parallelism;
-    std::vector<std::atomic<int>> *flagArrPtr;
+    int compression_parallelism;
+    //std::vector<std::atomic<int>> *flagArrPtr;
+    std::vector<FBQ_ptr> writeBufferPtr;
+    std::vector<FBQ_ptr> compBufferPtr;
+    std::vector<FBQ_ptr> sendBufferPtr;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
+    std::vector<SchemaAttribute> schema;
 };
 
 class DataSource {
@@ -62,15 +85,14 @@ public:
 
     double double_swap(double d);
 
-    std::string formatSchema(const std::vector<std::tuple<std::string, std::string, int>> &schema);
+    std::string formatSchema(const std::vector<SchemaAttribute> &schema);
 
-    std::string getAttributesAsStr(const std::vector<std::tuple<std::string, std::string, int>> &schema);
+    std::string getAttributesAsStr(const std::vector<SchemaAttribute> &schema);
 
 private:
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;
     std::vector<std::vector<std::byte>> &bp;
-    std::vector<std::atomic<int>> &flagArr;
     RuntimeEnv *xdbcEnv;
     std::string tableName;
 
