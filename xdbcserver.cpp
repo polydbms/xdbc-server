@@ -56,9 +56,9 @@ XDBCServer::XDBCServer(const RuntimeEnv &env)
           totalSentBuffers(0),
           tableName() {
 
-    bp.resize(env.bufferpool_size, std::vector<std::byte>(env.buffer_size * env.tuple_size));
+    bp.resize(env.bufferpool_size, std::vector<std::byte>(env.buffer_size * env.tuple_size + sizeof(Header)));
 
-    //initialize write queue
+    //initialize write queues
     for (int i = 0; i < xdbcEnv.deser_parallelism; i++) {
         FBQ_ptr q(new queue<int>);
         xdbcEnv.writeBufferPtr.push_back(q);
@@ -69,7 +69,13 @@ XDBCServer::XDBCServer(const RuntimeEnv &env)
             q->push(j);
     }
 
-    //initialize send queue
+    //initialize compression queues
+    for (int i = 0; i < xdbcEnv.compression_parallelism; i++) {
+        FBQ_ptr q(new queue<int>);
+        xdbcEnv.compBufferPtr.push_back(q);
+    }
+
+    //initialize send queues
     for (int i = 0; i < xdbcEnv.network_parallelism; i++) {
         FBQ_ptr q(new queue<int>);
         xdbcEnv.sendBufferPtr.push_back(q);
@@ -115,60 +121,25 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     size_t totalSentBytes = 0;
     int threadSentBuffers = 0;
 
-    boost::asio::const_buffer tmpHeaderBuff;
-    boost::asio::const_buffer tmpMsgBuff;
-    std::vector<boost::asio::const_buffer> sendBuffer;
+    boost::asio::const_buffer sendBuffer;
 
-    int loops = 0;
     bool boostError = false;
     int emptyCtr = 0;
 
 
-    while (emptyCtr < xdbcEnv.deser_parallelism && !boostError) {
+    while (emptyCtr < xdbcEnv.compression_parallelism && !boostError) {
 
         bufferId = xdbcEnv.sendBufferPtr[thr]->pop();
 
         if (bufferId == -1)
             emptyCtr++;
         else {
-            //TODO: replace function with a hashmap or similar
-            //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib, 6 cols
-            size_t compId = Compressor::getCompId(xdbcEnv.compression_algorithm);
 
-            //spdlog::get("XDBC.SERVER")->warn("Send thread {0} entering compression", thr);
-
-            std::array<size_t, MAX_ATTRIBUTES> compressed_sizes = Compressor::compress_buffer(
-                    xdbcEnv.compression_algorithm, bp[bufferId].data(),
-                    xdbcEnv.buffer_size * xdbcEnv.tuple_size,
-                    xdbcEnv.buffer_size, xdbcEnv.schema);
-
-            size_t totalSize = 0;
-            //TODO: check if schema larger than MAX_ATTRIBUTES
-
-            if (xdbcEnv.compression_algorithm == "cols" &&
-                compressed_sizes[0] == xdbcEnv.buffer_size * xdbcEnv.tuple_size)
-                totalSize = compressed_sizes[0];
-            else {
-                for (int i = 0; i < xdbcEnv.schema.size(); i++) {
-                    totalSize += compressed_sizes[i];
-                }
-
-            }
 
             //spdlog::get("XDBC.SERVER")->warn("Send thread {0} exited compression with total size {1}/{2}", thr,
             //                                             totalSize, xdbcEnv.buffer_size * xdbcEnv.tuple_size);
 
-            if (totalSize > xdbcEnv.buffer_size * xdbcEnv.tuple_size) {
-                spdlog::get("XDBC.SERVER")->warn("Send thread {0} compression more than buffer", thr);
-                compId = 0;
-            }
-            if (totalSize == xdbcEnv.buffer_size * xdbcEnv.tuple_size) {
-                compId = 0;
-            }
 
-            if (totalSize <= 0)
-                spdlog::get("XDBC.SERVER")->error("Send thread {0} compression: {1}, totalSize: {2}",
-                                                  thr, compId, totalSize);
 
 /*            if (bufferId == 0)
                 spdlog::get("XDBC.SERVER")->info("Send thread {0}, buffer: {1}, buffSize: {2}, ratio: {3}",
@@ -176,32 +147,23 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
                                                  static_cast<double>(totalSize) /
                                                  (xdbcEnv.buffer_size * xdbcEnv.tuple_size));*/
 
-            //TODO: create more sophisticated header with checksum etc
 
-            Header head;
-            head.compressionType = compId;
-            head.totalSize = totalSize;
-            head.intermediateFormat = static_cast<size_t>(xdbcEnv.iformat);
-            //head.crc = compute_crc(bp[bufferId].data(), totalSize);
-            head.attributeComp;
-
-
-            std::copy(compressed_sizes.begin(), compressed_sizes.end(), head.attributeSize);
-            //head.attributeSize = compressed_sizes;
 
             //std::array<size_t, 4> header{compId, compressed_size, compute_crc(bp[bufferId].data(), compressed_size),
             //                             static_cast<size_t>(xdbcEnv.iformat)};
 
             //tmpHeaderBuff = boost::asio::buffer(header);
-            tmpHeaderBuff = boost::asio::buffer(&head, sizeof(Header));
-            tmpMsgBuff = boost::asio::buffer(bp[bufferId], totalSize);
-            sendBuffer = {tmpHeaderBuff, tmpMsgBuff};
+            Header *headerPtr = reinterpret_cast<Header *>(bp[bufferId].data());
+            /*spdlog::get("XDBC.SERVER")->warn("buffer {0} compression: {1}, totalSize: {2}", bufferId,
+                                             headerPtr->compressionType, headerPtr->totalSize);*/
+            sendBuffer = boost::asio::buffer(bp[bufferId], headerPtr->totalSize + sizeof(Header));
 
             try {
                 totalSentBytes += boost::asio::write(socket, sendBuffer);
                 threadSentBuffers++;
                 totalSentBuffers.fetch_add(1);
                 //flagArr[bufferId].store(1);
+                //release buffer for reader
                 int writeQueueId = bufferId % xdbcEnv.deser_parallelism;
                 xdbcEnv.writeBufferPtr[writeQueueId]->push(bufferId);
 
@@ -224,7 +186,7 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
 }
 
 
-int XDBCServer::serve(int parallelism) {
+int XDBCServer::serve() {
 
 
     boost::asio::io_context ioContext;
@@ -240,7 +202,8 @@ int XDBCServer::serve(int parallelism) {
 
     spdlog::get("XDBC.SERVER")->info("Client wants to read table {0} ", tableName);
 
-    std::vector<thread> threads(parallelism);
+    std::vector<thread> net_threads(xdbcEnv.network_parallelism);
+    std::vector<thread> comp_threads(xdbcEnv.compression_parallelism);
     std::thread t1;
     std::unique_ptr<DataSource> ds;
 
@@ -258,12 +221,22 @@ int XDBCServer::serve(int parallelism) {
 
     spdlog::get("XDBC.SERVER")->info("Created {0} read threads", xdbcEnv.system);
 
+    std::unique_ptr<Compressor> compressorPtr;
+    compressorPtr = std::make_unique<Compressor>(xdbcEnv);
 
-    for (int i = 0; i < parallelism; i++) {
-        threads[i] = std::thread(&XDBCServer::send, this, i, std::ref(*ds));
+    for (int i = 0; i < xdbcEnv.compression_parallelism; i++) {
+        comp_threads[i] = std::thread(&Compressor::compress, compressorPtr.get(), i, xdbcEnv.compression_algorithm);
     }
 
-    spdlog::get("XDBC.SERVER")->info("Created send threads: {0} ", parallelism);
+    spdlog::get("XDBC.SERVER")->info("Created compress threads: {0} ", xdbcEnv.compression_parallelism);
+
+    for (int i = 0; i < xdbcEnv.network_parallelism; i++) {
+        net_threads[i] = std::thread(&XDBCServer::send, this, i, std::ref(*ds));
+    }
+
+
+    spdlog::get("XDBC.SERVER")->info("Created send threads: {0} ", xdbcEnv.network_parallelism);
+
 
     const std::string msg = "Server ready\n";
     boost::system::error_code error;
@@ -276,11 +249,18 @@ int XDBCServer::serve(int parallelism) {
 
 
     // Join all the threads
-    for (auto &thread: threads) {
+    for (auto &thread: comp_threads) {
         if (thread.joinable()) {
             thread.join();
         }
     }
+
+    for (auto &thread: net_threads) {
+        if (thread.joinable()) {
+            thread.join();
+        }
+    }
+
 
     t1.join();
     baseSocket.close();

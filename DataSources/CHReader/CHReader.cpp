@@ -137,7 +137,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
     int curBid = xdbcEnv->writeBufferPtr[thr]->pop();
     int bufferTupleId = 0;
-    int sendQueueId = 0;
+    int compQueueId = 0;
 
     while (true) {
         std::unique_lock<std::mutex> lock(partStackMutex);
@@ -165,7 +165,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
             int schemaSize = xdbcEnv->schema.size();
 
             client.Select(qStr,
-                          [this, &curBid, &totalThreadWrittenBuffers, &bufferTupleId, &totalThreadWrittenTuples, &sendQueueId, &thr, &schemaSize](
+                          [this, &curBid, &totalThreadWrittenBuffers, &bufferTupleId, &totalThreadWrittenTuples, &compQueueId, &thr, &schemaSize](
                                   const Block &block) {
 
 
@@ -210,10 +210,10 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
                                       //totalReadBuffers.fetch_add(1);
                                       totalThreadWrittenBuffers++;
-                                      xdbcEnv->sendBufferPtr[sendQueueId]->push(curBid);
-                                      sendQueueId++;
-                                      if (sendQueueId == xdbcEnv->network_parallelism)
-                                          sendQueueId = 0;
+                                      xdbcEnv->compBufferPtr[compQueueId]->push(curBid);
+                                      compQueueId++;
+                                      if (compQueueId == xdbcEnv->compression_parallelism)
+                                          compQueueId = 0;
 
                                       curBid = xdbcEnv->writeBufferPtr[thr]->pop();
 
@@ -242,7 +242,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                     memcpy(writePtr, &mone, 4);
                 }
 
-                xdbcEnv->sendBufferPtr[sendQueueId]->push(curBid);
+                xdbcEnv->compBufferPtr[compQueueId]->push(curBid);
                 totalReadBuffers.fetch_add(1);
                 totalThreadWrittenBuffers++;
             }
@@ -253,8 +253,8 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
         }
 
     }
-    for (int i = 0; i < xdbcEnv->network_parallelism; i++)
-        xdbcEnv->sendBufferPtr[i]->push(-1);
+    for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
+        xdbcEnv->compBufferPtr[i]->push(-1);
 
     return 1;
 }

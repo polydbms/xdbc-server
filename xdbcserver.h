@@ -30,7 +30,7 @@ class XDBCServer {
 public:
     explicit XDBCServer(const RuntimeEnv &env);
 
-    int serve(int parallelism);
+    int serve();
 
     int send(int threadno, DataSource &dataReader);
 

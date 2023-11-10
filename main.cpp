@@ -44,7 +44,9 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
             ("deser-parallelism,dp", po::value<int>()->default_value(4),
              "Set the number of deserialization parallelism.\nDefault: 4")
             ("network-parallelism,np", po::value<int>()->default_value(4),
-             "Set the send parallelism grade.\nDefault: 4");
+             "Set the send parallelism grade.\nDefault: 4")
+            ("compression-parallelism,cp", po::value<int>()->default_value(1),
+             "Set the compression parallelism grade.\nDefault: 1");
 
     po::positional_options_description p;
     p.add("compression-type", 1);
@@ -106,6 +108,10 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
         spdlog::get("XDBC.SERVER")->info("Deserialization parallelism: {0}", vm["deser-parallelism"].as<int>());
         env.deser_parallelism = vm["deser-parallelism"].as<int>();
     }
+    if (vm.count("compression-parallelism")) {
+        spdlog::get("XDBC.SERVER")->info("Compression parallelism: {0}", vm["compression-parallelism"].as<int>());
+        env.compression_parallelism = vm["compression-parallelism"].as<int>();
+    }
 
     //create schema
     std::vector<SchemaAttribute> schema;
@@ -154,7 +160,7 @@ int main(int argc, char *argv[]) {
         case 5: {
             op = "xdbc server";
             XDBCServer xdbcserver = XDBCServer(xdbcEnv);
-            xdbcserver.serve(xdbcEnv.network_parallelism);
+            xdbcserver.serve();
             break;
         }
         case 6: {

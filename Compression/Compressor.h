@@ -8,34 +8,33 @@
 
 class Compressor {
 public:
+
+    Compressor(RuntimeEnv &xdbcEnv);
+
     static size_t getCompId(const std::string &name);
 
     static std::array<size_t, MAX_ATTRIBUTES>
-    compress_buffer(const std::string &method, void *data, size_t size, size_t buffer_size,
+    compress_buffer(const std::string &method, void *src, void *dst, size_t size, size_t buffer_size,
                     const std::vector<SchemaAttribute> &schema);
 
-    static size_t compress_zstd(void *data, size_t size);
-
-    static size_t compress_zstd(void *data, void *src, size_t size);
-
-    static size_t compress_snappy(void *data, size_t size);
+    static size_t compress_zstd(void *src, void *dst, size_t size);
 
     static size_t compress_snappy(void *data, void *dst, size_t size);
 
-    static size_t compress_lzo(void *data, size_t size);
+    static size_t compress_lzo(void *src, void *dst, size_t size);
 
-    static size_t compress_lzo(void *data, void *dst, size_t size);
+    static size_t compress_lz4(void *src, void *dst, size_t size);
 
-    static size_t compress_lz4(void *data, size_t size);
+    static size_t compress_zlib(void *src, void *dst, size_t size);
 
-    static size_t compress_lz4(void *data, void *dst, size_t size);
-
-    static size_t compress_zlib(void *data, size_t size);
-
-    static size_t compress_zlib(void *data, void *dst, size_t size);
-
-    static std::array<size_t, MAX_ATTRIBUTES> compress_cols(void *data, size_t size, size_t buffer_size,
+    static std::array<size_t, MAX_ATTRIBUTES> compress_cols(void *src, void *dst, size_t size, size_t buffer_size,
                                                             const std::vector<SchemaAttribute> &schema);
+
+    void compress(int thr, const std::string &compName);
+
+private:
+    RuntimeEnv *xdbcEnv;
+    std::vector<std::vector<std::byte>> &bp;
 
 };
 

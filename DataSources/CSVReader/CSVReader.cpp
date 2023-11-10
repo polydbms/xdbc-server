@@ -223,7 +223,7 @@ int CSVReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &tota
     //spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} entered", thr);
     int emptyCtr = 0;
     int schemaSize = xdbcEnv->schema.size();
-    int sendQueueId = 0;
+    int compQueueId = 0;
     char *endPtr;
     size_t len;
     int celli = -1;
@@ -310,10 +310,10 @@ int CSVReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &tota
                     //flagArr[curBid].store(0);
                     //totalReadBuffers.fetch_add(1);
                     totalThreadWrittenBuffers++;
-                    xdbcEnv->sendBufferPtr[sendQueueId]->push(curBid);
-                    sendQueueId++;
-                    if (sendQueueId == xdbcEnv->network_parallelism)
-                        sendQueueId = 0;
+                    xdbcEnv->compBufferPtr[compQueueId]->push(curBid);
+                    compQueueId++;
+                    if (compQueueId == xdbcEnv->compression_parallelism)
+                        compQueueId = 0;
 
                     curBid = xdbcEnv->writeBufferPtr[thr]->pop();
                     bpPtr = bp[curBid].data();
@@ -343,7 +343,7 @@ int CSVReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &tota
 
                 //spdlog::get("XDBC.SERVER")->info("thr {0} finished remaining", thr);
                 //totalReadBuffers.fetch_add(1);
-                xdbcEnv->sendBufferPtr[sendQueueId]->push(curBid);
+                xdbcEnv->compBufferPtr[compQueueId]->push(curBid);
                 totalThreadWrittenBuffers++;
             }
 
@@ -356,8 +356,8 @@ int CSVReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &tota
         }
     }
 
-    for (int i = 0; i < xdbcEnv->network_parallelism; i++)
-        xdbcEnv->sendBufferPtr[i]->push(-1);
+    for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
+        xdbcEnv->compBufferPtr[i]->push(-1);
 
     return 1;
 }

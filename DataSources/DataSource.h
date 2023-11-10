@@ -59,8 +59,10 @@ struct RuntimeEnv {
     int read_partitions;
     int deser_parallelism;
     int network_parallelism;
+    int compression_parallelism;
     //std::vector<std::atomic<int>> *flagArrPtr;
     std::vector<FBQ_ptr> writeBufferPtr;
+    std::vector<FBQ_ptr> compBufferPtr;
     std::vector<FBQ_ptr> sendBufferPtr;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
