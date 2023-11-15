@@ -50,21 +50,22 @@ string read_(tcp::socket &socket) {
 }
 
 
-XDBCServer::XDBCServer(const RuntimeEnv &env)
+XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
         : bp(),
-          xdbcEnv(env),
+          xdbcEnv(&xdbcEnv),
           totalSentBuffers(0),
           tableName() {
 
-    bp.resize(env.bufferpool_size, std::vector<std::byte>(env.buffer_size * env.tuple_size + sizeof(Header)));
+    bp.resize(xdbcEnv.bufferpool_size,
+              std::vector<std::byte>(xdbcEnv.buffer_size * xdbcEnv.tuple_size + sizeof(Header)));
 
     //initialize write queues
     for (int i = 0; i < xdbcEnv.deser_parallelism; i++) {
         FBQ_ptr q(new queue<int>);
         xdbcEnv.writeBufferPtr.push_back(q);
         //initially all buffers are free to write into
-        for (int j = i * (env.bufferpool_size / env.deser_parallelism);
-             j < (i + 1) * (env.bufferpool_size / env.deser_parallelism);
+        for (int j = i * (xdbcEnv.bufferpool_size / xdbcEnv.deser_parallelism);
+             j < (i + 1) * (xdbcEnv.bufferpool_size / xdbcEnv.deser_parallelism);
              j++)
             q->push(j);
     }
@@ -85,7 +86,7 @@ XDBCServer::XDBCServer(const RuntimeEnv &env)
     xdbcEnv.bpPtr = &bp;
 
     spdlog::get("XDBC.SERVER")->info("Created XDBC Server with BPS: {0} buffers, BS: {1} bytes, TS: {2} bytes",
-                                     bp.size(), env.buffer_size * env.tuple_size, env.tuple_size);
+                                     bp.size(), xdbcEnv.buffer_size * xdbcEnv.tuple_size, xdbcEnv.tuple_size);
 
 }
 
@@ -105,8 +106,8 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     readThreadId.erase(std::remove(readThreadId.begin(), readThreadId.end(), '\n'), readThreadId.cend());
 
     //decide partitioning
-    int minBId = thr * (xdbcEnv.bufferpool_size / xdbcEnv.network_parallelism);
-    int maxBId = (thr + 1) * (xdbcEnv.bufferpool_size / xdbcEnv.network_parallelism);
+    int minBId = thr * (xdbcEnv->bufferpool_size / xdbcEnv->network_parallelism);
+    int maxBId = (thr + 1) * (xdbcEnv->bufferpool_size / xdbcEnv->network_parallelism);
 
     //int minBId = 0;
     //int maxBId = xdbcEnv.bufferpool_size;
@@ -115,7 +116,7 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
             "Send thread {0} paired with Client read thread {1} assigned buffers [{2},{3}]",
             thr, readThreadId, minBId, maxBId);
 
-    auto start = std::chrono::steady_clock::now();
+    auto starttime = std::chrono::steady_clock::now();
 
     int bufferId;
     size_t totalSentBytes = 0;
@@ -127,13 +128,20 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     int emptyCtr = 0;
 
 
-    while (emptyCtr < xdbcEnv.compression_parallelism && !boostError) {
+    while (emptyCtr < xdbcEnv->compression_parallelism && !boostError) {
 
-        bufferId = xdbcEnv.sendBufferPtr[thr]->pop();
+        auto start_wait = std::chrono::high_resolution_clock::now();
+
+        bufferId = xdbcEnv->sendBufferPtr[thr]->pop();
+
+        auto duration_wait_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now() - start_wait).count();
+        xdbcEnv->network_wait_time.fetch_add(duration_wait_microseconds, std::memory_order_relaxed);
 
         if (bufferId == -1)
             emptyCtr++;
         else {
+
 
 
             //spdlog::get("XDBC.SERVER")->warn("Send thread {0} exited compression with total size {1}/{2}", thr,
@@ -159,13 +167,21 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
             sendBuffer = boost::asio::buffer(bp[bufferId], headerPtr->totalSize + sizeof(Header));
 
             try {
+                auto start = std::chrono::high_resolution_clock::now();
+
                 totalSentBytes += boost::asio::write(socket, sendBuffer);
+
+                auto duration_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::high_resolution_clock::now() - start).count();
+                xdbcEnv->network_time.fetch_add(duration_microseconds, std::memory_order_relaxed);
+
                 threadSentBuffers++;
                 totalSentBuffers.fetch_add(1);
                 //flagArr[bufferId].store(1);
                 //release buffer for reader
-                int writeQueueId = bufferId % xdbcEnv.deser_parallelism;
-                xdbcEnv.writeBufferPtr[writeQueueId]->push(bufferId);
+                int writeQueueId = bufferId % xdbcEnv->deser_parallelism;
+                xdbcEnv->writeBufferPtr[writeQueueId]->push(bufferId);
+
 
             } catch (const boost::system::system_error &e) {
                 spdlog::get("XDBC.SERVER")->error("Error writing to socket:  {0} ", e.what());
@@ -175,9 +191,10 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
         }
     }
 
-    auto end = std::chrono::steady_clock::now();
+    auto endtime = std::chrono::steady_clock::now();
     spdlog::get("XDBC.SERVER")->info("Send thread {0} finished. Elapsed time: {1} ms, bytes {2}, #buffers {3} ",
-                                     thr, std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(),
+                                     thr,
+                                     std::chrono::duration_cast<std::chrono::milliseconds>(endtime - starttime).count(),
                                      totalSentBytes, threadSentBuffers);
 
     socket.close();
@@ -202,40 +219,40 @@ int XDBCServer::serve() {
 
     spdlog::get("XDBC.SERVER")->info("Client wants to read table {0} ", tableName);
 
-    std::vector<thread> net_threads(xdbcEnv.network_parallelism);
-    std::vector<thread> comp_threads(xdbcEnv.compression_parallelism);
+    std::vector<thread> net_threads(xdbcEnv->network_parallelism);
+    std::vector<thread> comp_threads(xdbcEnv->compression_parallelism);
     std::thread t1;
     std::unique_ptr<DataSource> ds;
 
-    if (xdbcEnv.system == "postgres") {
-        ds = std::make_unique<PGReader>(xdbcEnv, tableName);
-    } else if (xdbcEnv.system == "clickhouse") {
-        ds = std::make_unique<CHReader>(xdbcEnv, tableName);
-    } else if (xdbcEnv.system == "csv") {
-        ds = std::make_unique<CSVReader>(xdbcEnv, tableName);
+    if (xdbcEnv->system == "postgres") {
+        ds = std::make_unique<PGReader>(*xdbcEnv, tableName);
+    } else if (xdbcEnv->system == "clickhouse") {
+        ds = std::make_unique<CHReader>(*xdbcEnv, tableName);
+    } else if (xdbcEnv->system == "csv") {
+        ds = std::make_unique<CSVReader>(*xdbcEnv, tableName);
     }
 
     t1 = std::thread([&ds]() {
         ds->readData();
     });
 
-    spdlog::get("XDBC.SERVER")->info("Created {0} read threads", xdbcEnv.system);
+    spdlog::get("XDBC.SERVER")->info("Created {0} read threads", xdbcEnv->system);
 
     std::unique_ptr<Compressor> compressorPtr;
-    compressorPtr = std::make_unique<Compressor>(xdbcEnv);
+    compressorPtr = std::make_unique<Compressor>(*xdbcEnv);
 
-    for (int i = 0; i < xdbcEnv.compression_parallelism; i++) {
-        comp_threads[i] = std::thread(&Compressor::compress, compressorPtr.get(), i, xdbcEnv.compression_algorithm);
+    for (int i = 0; i < xdbcEnv->compression_parallelism; i++) {
+        comp_threads[i] = std::thread(&Compressor::compress, compressorPtr.get(), i, xdbcEnv->compression_algorithm);
     }
 
-    spdlog::get("XDBC.SERVER")->info("Created compress threads: {0} ", xdbcEnv.compression_parallelism);
+    spdlog::get("XDBC.SERVER")->info("Created compress threads: {0} ", xdbcEnv->compression_parallelism);
 
-    for (int i = 0; i < xdbcEnv.network_parallelism; i++) {
+    for (int i = 0; i < xdbcEnv->network_parallelism; i++) {
         net_threads[i] = std::thread(&XDBCServer::send, this, i, std::ref(*ds));
     }
 
 
-    spdlog::get("XDBC.SERVER")->info("Created send threads: {0} ", xdbcEnv.network_parallelism);
+    spdlog::get("XDBC.SERVER")->info("Created send threads: {0} ", xdbcEnv->network_parallelism);
 
 
     const std::string msg = "Server ready\n";

@@ -49,17 +49,26 @@ struct SchemaAttribute {
 typedef std::shared_ptr<queue<int>> FBQ_ptr;
 
 struct RuntimeEnv {
+    long transfer_id;
     std::string compression_algorithm;
     int iformat;
     int buffer_size;
     int bufferpool_size;
     int tuple_size;
     std::chrono::milliseconds sleep_time;
-    int read_parallelism;
     int read_partitions;
+    int read_parallelism;
     int deser_parallelism;
     int network_parallelism;
     int compression_parallelism;
+    std::atomic<long long> read_wait_time;
+    std::atomic<long long> deser_wait_time;
+    std::atomic<long long> network_wait_time;
+    std::atomic<long long> compression_wait_time;
+    std::atomic<long long> read_time;
+    std::atomic<long long> deser_time;
+    std::atomic<long long> network_time;
+    std::atomic<long long> compression_time;
     //std::vector<std::atomic<int>> *flagArrPtr;
     std::vector<FBQ_ptr> writeBufferPtr;
     std::vector<FBQ_ptr> compBufferPtr;

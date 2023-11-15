@@ -23,10 +23,19 @@ void Compressor::compress(int thr, const std::string &compName) {
     int netQ = 0;
 
     while (emptyCtr < xdbcEnv->deser_parallelism) {
+        auto start_wait = std::chrono::high_resolution_clock::now();
+
         bufferId = xdbcEnv->compBufferPtr[thr]->pop();
+
+        auto duration_wait_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+                std::chrono::high_resolution_clock::now() - start_wait).count();
+        xdbcEnv->compression_wait_time.fetch_add(duration_wait_microseconds, std::memory_order_relaxed);
+
         if (bufferId == -1)
             emptyCtr++;
         else {
+
+            auto start = std::chrono::high_resolution_clock::now();
 
             //TODO: replace function with a hashmap or similar
             //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib, 6 cols
@@ -38,6 +47,11 @@ void Compressor::compress(int thr, const std::string &compName) {
                     xdbcEnv->compression_algorithm, bp[bufferId].data(), bp[bufferId].data() + sizeof(Header),
                     xdbcEnv->buffer_size * xdbcEnv->tuple_size,
                     xdbcEnv->buffer_size, xdbcEnv->schema);
+
+            auto duration_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::high_resolution_clock::now() - start).count();
+            xdbcEnv->compression_time.fetch_add(duration_microseconds, std::memory_order_relaxed);
+
 
             size_t totalSize = 0;
             //TODO: check if schema larger than MAX_ATTRIBUTES
@@ -80,7 +94,6 @@ void Compressor::compress(int thr, const std::string &compName) {
             netQ++;
             if (netQ == xdbcEnv->network_parallelism)
                 netQ = 0;
-
         }
     }
 

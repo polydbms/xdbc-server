@@ -28,14 +28,14 @@ struct Header {
 
 class XDBCServer {
 public:
-    explicit XDBCServer(const RuntimeEnv &env);
+    explicit XDBCServer(RuntimeEnv &env);
 
     int serve();
 
     int send(int threadno, DataSource &dataReader);
 
 private:
-    RuntimeEnv xdbcEnv;
+    RuntimeEnv *xdbcEnv;
     std::vector<std::vector<std::byte>> bp;
     //std::vector<std::atomic<int>> flagArr;
     std::atomic<int> totalSentBuffers;

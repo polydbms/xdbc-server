@@ -7,6 +7,8 @@
 #include <thread>
 #include <boost/program_options.hpp>
 #include <utility>
+#include <fstream>
+#include <iomanip>
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 
@@ -21,7 +23,7 @@ SchemaAttribute createSchemaAttribute(std::string name, std::string tpe, int siz
     return att;
 }
 
-RuntimeEnv handleCMDParams(int ac, char *av[]) {
+void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
     // Declare the supported options.
     po::options_description desc("Usage: ./xdbc-server [options]\n\nAllowed options");
     desc.add_options()
@@ -46,7 +48,9 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
             ("network-parallelism,np", po::value<int>()->default_value(4),
              "Set the send parallelism grade.\nDefault: 4")
             ("compression-parallelism,cp", po::value<int>()->default_value(1),
-             "Set the compression parallelism grade.\nDefault: 1");
+             "Set the compression parallelism grade.\nDefault: 1")
+            ("transfer-id,tid", po::value<long>()->default_value(0),
+             "Set the transfer id.\nDefault: 0");
 
     po::positional_options_description p;
     p.add("compression-type", 1);
@@ -60,7 +64,6 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
         exit(0);
     }
 
-    RuntimeEnv env;
 
     if (vm.count("system")) {
         spdlog::get("XDBC.SERVER")->info("system: {0}", vm["system"].as<string>());
@@ -112,6 +115,10 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
         spdlog::get("XDBC.SERVER")->info("Compression parallelism: {0}", vm["compression-parallelism"].as<int>());
         env.compression_parallelism = vm["compression-parallelism"].as<int>();
     }
+    if (vm.count("transfer-id")) {
+        spdlog::get("XDBC.SERVER")->info("Transfer id: {0}", vm["transfer-id"].as<long>());
+        env.transfer_id = vm["transfer-id"].as<long>();
+    }
 
     //create schema
     std::vector<SchemaAttribute> schema;
@@ -124,15 +131,26 @@ RuntimeEnv handleCMDParams(int ac, char *av[]) {
     schema.emplace_back(createSchemaAttribute("l_discount", "DOUBLE", 8));
     schema.emplace_back(createSchemaAttribute("l_tax", "DOUBLE", 8));
 
+    env.read_time = 0;
+    env.deser_time = 0;
+    env.compression_time = 0;
+    env.network_time = 0;
+
+    env.read_wait_time = 0;
+    env.deser_wait_time = 0;
+    env.compression_wait_time = 0;
+    env.network_wait_time = 0;
+
     env.schema = schema;
-    return env;
+
 }
 
 int main(int argc, char *argv[]) {
 
     auto console = spdlog::stdout_color_mt("XDBC.SERVER");
 
-    RuntimeEnv xdbcEnv = handleCMDParams(argc, argv);
+    RuntimeEnv xdbcEnv;
+    handleCMDParams(argc, argv, xdbcEnv);
 
     int option = 5;
 
@@ -173,9 +191,40 @@ int main(int argc, char *argv[]) {
             break;
     }
     auto end = std::chrono::steady_clock::now();
+    auto total_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-    spdlog::get("XDBC.SERVER")->info("{0} | Total elapsed time: {1} ms",
-                                     op, std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count());
+    spdlog::get("XDBC.SERVER")->info("{0} | Total elapsed time: {1} ms", op, total_time);
+
+    spdlog::get("XDBC.SERVER")->info(
+            "{0} | read time: {1} ms, deser time: {2} ms, compress time {3} ms, network time {4} ms",
+            op, xdbcEnv.read_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.read_parallelism,
+            xdbcEnv.deser_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.deser_parallelism,
+            xdbcEnv.compression_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.compression_parallelism,
+            xdbcEnv.network_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.network_parallelism);
+
+    spdlog::get("XDBC.SERVER")->info(
+            "{0} | read wait time: {1} ms, deser wait time: {2} ms, compress wait time {3} ms, network wait time {4} ms",
+            op, xdbcEnv.read_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.read_parallelism,
+            xdbcEnv.deser_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.deser_parallelism,
+            xdbcEnv.compression_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.compression_parallelism,
+            xdbcEnv.network_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.network_parallelism);
+
+    std::ofstream csv_file("/tmp/xdbc_server_timings.csv",
+                           std::ios::out | std::ios::app);
+
+    csv_file << std::fixed << std::setprecision(2)
+             << std::to_string(xdbcEnv.transfer_id) << "," << total_time << ","
+             << xdbcEnv.read_wait_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.read_parallelism << ","
+             << xdbcEnv.read_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.read_parallelism << ","
+             << xdbcEnv.deser_wait_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.deser_parallelism << ","
+             << xdbcEnv.deser_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.deser_parallelism << ","
+             << xdbcEnv.compression_wait_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.compression_parallelism
+             << ","
+             << xdbcEnv.compression_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.compression_parallelism
+             << ","
+             << xdbcEnv.network_wait_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.network_parallelism << ","
+             << xdbcEnv.network_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.network_parallelism << "\n";
+    csv_file.close();
 
     return 0;
 }
