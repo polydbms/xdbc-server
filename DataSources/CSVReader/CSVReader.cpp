@@ -12,8 +12,10 @@ void handle_error(const char *msg) {
 static uintmax_t wc(char const *fname) {
     static const auto BUFFER_SIZE = 16 * 1024;
     int fd = open(fname, O_RDONLY);
-    if (fd == -1)
+    if (fd == -1) {
         handle_error("open");
+        spdlog::get("XDBC.SERVER")->error("File does not exist: {0}", fname);
+    }
 
     posix_fadvise(fd, 0, 0, 1);  // FDADVICE_SEQUENTIAL
 
@@ -366,7 +368,7 @@ int CSVReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &tota
 
             //remaining tuples
             if (bufferTupleId > 0 && bufferTupleId != xdbcEnv->buffer_size) {
-                spdlog::get("XDBC.SERVER")->info("PG Deser thread {0} has {1} remaining tuples",
+                spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} has {1} remaining tuples",
                                                  thr, xdbcEnv->buffer_size - bufferTupleId);
 
                 //TODO: remove dirty fix, potentially with buffer header or resizable buffers

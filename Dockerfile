@@ -10,7 +10,7 @@ RUN apt-get upgrade -qy
 
 # install dependencies
 
-RUN apt install -qy clang libboost-all-dev cmake build-essential git libspdlog-dev
+RUN apt install -qy clang libboost-all-dev cmake build-essential git libspdlog-dev gdb
 
 #RUN git clone https://github.com/gabime/spdlog.git && cd spdlog && mkdir build && cd build &&  cmake .. && make -j && make install
 

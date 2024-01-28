@@ -28,8 +28,8 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
     po::options_description desc("Usage: ./xdbc-server [options]\n\nAllowed options");
     desc.add_options()
             ("help,h", "Produce this help message.")
-            ("system,y", po::value<string>()->default_value("postgres"),
-             "Set system: \nDefault:\n  postgres\nOther:\n  clickhouse")
+            ("system,y", po::value<string>()->default_value("csv"),
+             "Set system: \nDefault:\n  csv\nOther:\n  postgres, clickhouse")
             ("compression-type,c", po::value<string>()->default_value("nocomp"),
              "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4\n zlib\n cols")
             ("intermediate-format,f", po::value<int>()->default_value(1),
@@ -41,11 +41,11 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
             ("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
             ("sleep-time,s", po::value<int>()->default_value(5), "Set a sleep-time in milli seconds.\nDefault: 5ms")
             ("read-parallelism,rp", po::value<int>()->default_value(4), "Set the read parallelism grade.\nDefault: 4")
-            ("read-partitions,rpp", po::value<int>()->default_value(4),
-             "Set the number of read partitions.\nDefault: 4")
+            ("read-partitions,rpp", po::value<int>()->default_value(1),
+             "Set the number of read partitions.\nDefault: 1")
             ("deser-parallelism,dp", po::value<int>()->default_value(4),
-             "Set the number of deserialization parallelism.\nDefault: 4")
-            ("network-parallelism,np", po::value<int>()->default_value(4),
+             "Set the number of deserialization parallelism.\nDefault: 1")
+            ("network-parallelism,np", po::value<int>()->default_value(1),
              "Set the send parallelism grade.\nDefault: 4")
             ("compression-parallelism,cp", po::value<int>()->default_value(1),
              "Set the compression parallelism grade.\nDefault: 1")
