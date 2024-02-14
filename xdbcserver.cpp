@@ -59,10 +59,10 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
     bp.resize(xdbcEnv.bufferpool_size,
               std::vector<std::byte>(xdbcEnv.buffer_size * xdbcEnv.tuple_size + sizeof(Header)));
 
-    //initialize write queues
-    for (int i = 0; i < xdbcEnv.deser_parallelism; i++) {
-        FBQ_ptr q(new queue<int>);
-        xdbcEnv.writeBufferPtr.push_back(q);
+    //initialize read queues
+    for (int i = 0; i < xdbcEnv.read_parallelism; i++) {
+        FBQ_ptr q(new customQueue<int>);
+        xdbcEnv.readBufferPtr.push_back(q);
         //initially all buffers are free to write into
         for (int j = i * (xdbcEnv.bufferpool_size / xdbcEnv.deser_parallelism);
              j < (i + 1) * (xdbcEnv.bufferpool_size / xdbcEnv.deser_parallelism);
@@ -70,15 +70,21 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
             q->push(j);
     }
 
+    //initialize deser queues
+    for (int i = 0; i < xdbcEnv.deser_parallelism; i++) {
+        FBQ_ptr q(new customQueue<int>);
+        xdbcEnv.deserBufferPtr.push_back(q);
+    }
+
     //initialize compression queues
     for (int i = 0; i < xdbcEnv.compression_parallelism; i++) {
-        FBQ_ptr q(new queue<int>);
+        FBQ_ptr q(new customQueue<int>);
         xdbcEnv.compBufferPtr.push_back(q);
     }
 
     //initialize send queues
     for (int i = 0; i < xdbcEnv.network_parallelism; i++) {
-        FBQ_ptr q(new queue<int>);
+        FBQ_ptr q(new customQueue<int>);
         xdbcEnv.sendBufferPtr.push_back(q);
     }
 
@@ -115,8 +121,6 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     spdlog::get("XDBC.SERVER")->info(
             "Send thread {0} paired with Client read thread {1} assigned buffers [{2},{3}]",
             thr, readThreadId, minBId, maxBId);
-
-    auto starttime = std::chrono::steady_clock::now();
 
     int bufferId;
     size_t totalSentBytes = 0;
@@ -171,16 +175,13 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
 
                 totalSentBytes += boost::asio::write(socket, sendBuffer);
 
-                auto duration_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::high_resolution_clock::now() - start).count();
-                xdbcEnv->network_time.fetch_add(duration_microseconds, std::memory_order_relaxed);
 
                 threadSentBuffers++;
                 totalSentBuffers.fetch_add(1);
                 //flagArr[bufferId].store(1);
                 //release buffer for reader
-                int writeQueueId = bufferId % xdbcEnv->deser_parallelism;
-                xdbcEnv->writeBufferPtr[writeQueueId]->push(bufferId);
+                int readQueueId = bufferId % xdbcEnv->deser_parallelism;
+                xdbcEnv->deserBufferPtr[readQueueId]->push(bufferId);
 
 
             } catch (const boost::system::system_error &e) {
@@ -191,11 +192,8 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
         }
     }
 
-    auto endtime = std::chrono::steady_clock::now();
-    spdlog::get("XDBC.SERVER")->info("Send thread {0} finished. Elapsed time: {1} ms, bytes {2}, #buffers {3} ",
-                                     thr,
-                                     std::chrono::duration_cast<std::chrono::milliseconds>(endtime - starttime).count(),
-                                     totalSentBytes, threadSentBuffers);
+    spdlog::get("XDBC.SERVER")->info("Send thread {0} finished. Bytes {1}, #buffers {2} ",
+                                     thr, totalSentBytes, threadSentBuffers);
 
     socket.close();
 
@@ -241,9 +239,12 @@ int XDBCServer::serve() {
     std::unique_ptr<Compressor> compressorPtr;
     compressorPtr = std::make_unique<Compressor>(*xdbcEnv);
 
+    auto start = std::chrono::high_resolution_clock::now();
     for (int i = 0; i < xdbcEnv->compression_parallelism; i++) {
         comp_threads[i] = std::thread(&Compressor::compress, compressorPtr.get(), i, xdbcEnv->compression_algorithm);
     }
+
+    auto start_net = std::chrono::high_resolution_clock::now();
 
     spdlog::get("XDBC.SERVER")->info("Created compress threads: {0} ", xdbcEnv->compression_parallelism);
 
@@ -272,11 +273,19 @@ int XDBCServer::serve() {
         }
     }
 
+    auto duration_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now() - start).count();
+    xdbcEnv->compression_time.fetch_add(duration_microseconds, std::memory_order_relaxed);
+
     for (auto &thread: net_threads) {
         if (thread.joinable()) {
             thread.join();
         }
     }
+
+    auto duration_microseconds_network = std::chrono::duration_cast<std::chrono::microseconds>(
+            std::chrono::high_resolution_clock::now() - start_net).count();
+    xdbcEnv->network_time.fetch_add(duration_microseconds_network, std::memory_order_relaxed);
 
 
     t1.join();

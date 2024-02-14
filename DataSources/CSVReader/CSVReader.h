@@ -6,7 +6,7 @@
 
 
 class CSVReader : public DataSource {
-    typedef std::shared_ptr<queue<std::vector<std::string>>> Q_ptr;
+    typedef std::shared_ptr<customQueue<std::vector<std::string>>> Q_ptr;
 
 public:
     CSVReader(RuntimeEnv &xdbcEnv, const std::string &tableName);

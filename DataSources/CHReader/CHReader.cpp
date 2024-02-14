@@ -135,7 +135,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
     Client client(ClientOptions().SetHost("ch").SetPort(9000));
 
-    int curBid = xdbcEnv->writeBufferPtr[thr]->pop();
+    int curBid = xdbcEnv->deserBufferPtr[thr]->pop();
     int bufferTupleId = 0;
     int compQueueId = 0;
 
@@ -215,7 +215,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                                       if (compQueueId == xdbcEnv->compression_parallelism)
                                           compQueueId = 0;
 
-                                      curBid = xdbcEnv->writeBufferPtr[thr]->pop();
+                                      curBid = xdbcEnv->deserBufferPtr[thr]->pop();
 
                                   }
                               }

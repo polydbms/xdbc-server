@@ -3,7 +3,7 @@
 #include <deque>
 
 template<typename T>
-class queue {
+class customQueue {
 private:
     std::mutex d_mutex;
     std::condition_variable d_condition;

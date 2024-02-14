@@ -365,7 +365,7 @@ int PGReader::read_pq_copy() {
 
     //initialize deser queues
     for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
-        Q_ptr q(new queue<vector<string>>);
+        Q_ptr q(new customQueue<vector<string>>);
         qs.push_back(q);
     }
 
@@ -454,7 +454,7 @@ PGReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                                              maxBId, src[0]);*/
 
 
-            int curBid = xdbcEnv->writeBufferPtr[thr]->pop();
+            int curBid = xdbcEnv->deserBufferPtr[thr]->pop();
             auto bpPtr = bp[curBid].data();
 
             for (int i = 0; i < src.size(); i++) {
@@ -519,7 +519,7 @@ PGReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                     if (compQueueId == xdbcEnv->compression_parallelism)
                         compQueueId = 0;
 
-                    curBid = xdbcEnv->writeBufferPtr[thr]->pop();
+                    curBid = xdbcEnv->deserBufferPtr[thr]->pop();
                     bpPtr = bp[curBid].data();
                 }
 

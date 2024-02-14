@@ -43,7 +43,7 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
             ("read-parallelism,rp", po::value<int>()->default_value(4), "Set the read parallelism grade.\nDefault: 4")
             ("read-partitions,rpp", po::value<int>()->default_value(1),
              "Set the number of read partitions.\nDefault: 1")
-            ("deser-parallelism,dp", po::value<int>()->default_value(4),
+            ("deser-parallelism,dp", po::value<int>()->default_value(1),
              "Set the number of deserialization parallelism.\nDefault: 1")
             ("network-parallelism,np", po::value<int>()->default_value(1),
              "Set the send parallelism grade.\nDefault: 4")
@@ -195,35 +195,42 @@ int main(int argc, char *argv[]) {
 
     spdlog::get("XDBC.SERVER")->info("{0} | Total elapsed time: {1} ms", op, total_time);
 
+    long long read_wait_time = xdbcEnv.read_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.read_parallelism;
+    long long read_time = (xdbcEnv.read_time.load(std::memory_order_relaxed) / 1000 - read_wait_time);
+
+    long long deser_wait_time =
+            xdbcEnv.deser_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.deser_parallelism;
+    long long deser_time = (xdbcEnv.deser_time.load(std::memory_order_relaxed) / 1000 - deser_wait_time);
+
+    long long cmp_wait_time =
+            xdbcEnv.compression_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.compression_parallelism;
+    long long cmp_time = (xdbcEnv.compression_time.load(std::memory_order_relaxed) / 1000 - cmp_wait_time);
+
+    long long net_wait_time =
+            xdbcEnv.network_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.network_parallelism;
+    long long net_time = (xdbcEnv.network_time.load(std::memory_order_relaxed) / 1000 - net_wait_time);
+
     spdlog::get("XDBC.SERVER")->info(
             "{0} | read time: {1} ms, deser time: {2} ms, compress time {3} ms, network time {4} ms",
-            op, xdbcEnv.read_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.read_parallelism,
-            xdbcEnv.deser_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.deser_parallelism,
-            xdbcEnv.compression_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.compression_parallelism,
-            xdbcEnv.network_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.network_parallelism);
+            op, read_time, deser_time, cmp_time, net_time);
 
     spdlog::get("XDBC.SERVER")->info(
             "{0} | read wait time: {1} ms, deser wait time: {2} ms, compress wait time {3} ms, network wait time {4} ms",
-            op, xdbcEnv.read_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.read_parallelism,
-            xdbcEnv.deser_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.deser_parallelism,
-            xdbcEnv.compression_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.compression_parallelism,
-            xdbcEnv.network_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.network_parallelism);
+            op, read_wait_time, deser_wait_time, cmp_wait_time, net_wait_time);
 
     std::ofstream csv_file("/tmp/xdbc_server_timings.csv",
                            std::ios::out | std::ios::app);
 
     csv_file << std::fixed << std::setprecision(2)
              << std::to_string(xdbcEnv.transfer_id) << "," << total_time << ","
-             << xdbcEnv.read_wait_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.read_parallelism << ","
-             << xdbcEnv.read_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.read_parallelism << ","
-             << xdbcEnv.deser_wait_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.deser_parallelism << ","
-             << xdbcEnv.deser_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.deser_parallelism << ","
-             << xdbcEnv.compression_wait_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.compression_parallelism
-             << ","
-             << xdbcEnv.compression_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.compression_parallelism
-             << ","
-             << xdbcEnv.network_wait_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.network_parallelism << ","
-             << xdbcEnv.network_time.load(std::memory_order_relaxed) / 1000.0 / xdbcEnv.network_parallelism << "\n";
+             << read_wait_time << ","
+             << read_time << ","
+             << deser_wait_time << ","
+             << deser_time << ","
+             << cmp_wait_time << ","
+             << cmp_time << ","
+             << net_wait_time << ","
+             << net_time << "\n";
     csv_file.close();
 
     return 0;

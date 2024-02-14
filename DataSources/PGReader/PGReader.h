@@ -11,7 +11,7 @@
 #include "../DataSource.h"
 
 class PGReader : public DataSource {
-    typedef std::shared_ptr<queue<std::vector<std::string>>> Q_ptr;
+    typedef std::shared_ptr<customQueue<std::vector<std::string>>> Q_ptr;
 public:
 
     PGReader(RuntimeEnv &xdbcEnv, const std::string &tableName);

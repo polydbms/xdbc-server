@@ -5,7 +5,7 @@
 #include <atomic>
 #include <vector>
 #include <chrono>
-#include "../queue.h"
+#include "../customQueue.h"
 
 //#define BUFFER_SIZE 1000
 //#define BUFFERPOOL_SIZE 1000
@@ -46,7 +46,7 @@ struct SchemaAttribute {
     std::string tpe;
     int size;
 };
-typedef std::shared_ptr<queue<int>> FBQ_ptr;
+typedef std::shared_ptr<customQueue<int>> FBQ_ptr;
 
 struct RuntimeEnv {
     long transfer_id;
@@ -70,7 +70,8 @@ struct RuntimeEnv {
     std::atomic<long long> network_time;
     std::atomic<long long> compression_time;
     //std::vector<std::atomic<int>> *flagArrPtr;
-    std::vector<FBQ_ptr> writeBufferPtr;
+    std::vector<FBQ_ptr> readBufferPtr;
+    std::vector<FBQ_ptr> deserBufferPtr;
     std::vector<FBQ_ptr> compBufferPtr;
     std::vector<FBQ_ptr> sendBufferPtr;
     std::vector<std::vector<std::byte>> *bpPtr;

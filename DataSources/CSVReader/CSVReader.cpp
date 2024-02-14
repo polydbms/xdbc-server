@@ -86,7 +86,7 @@ void CSVReader::readData() {
 
     //initialize deser queues
     for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
-        Q_ptr q(new queue<std::vector<std::string>>);
+        Q_ptr q(new customQueue<std::vector<std::string>>);
         qs.push_back(q);
     }
 
@@ -272,7 +272,7 @@ int CSVReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &tota
 
             start_wait = std::chrono::high_resolution_clock::now();
 
-            int curBid = xdbcEnv->writeBufferPtr[thr]->pop();
+            int curBid = xdbcEnv->deserBufferPtr[thr]->pop();
 
             duration_wait_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
                     std::chrono::high_resolution_clock::now() - start_wait).count();
@@ -350,7 +350,7 @@ int CSVReader::writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &tota
 
                     start_wait = std::chrono::high_resolution_clock::now();
 
-                    curBid = xdbcEnv->writeBufferPtr[thr]->pop();
+                    curBid = xdbcEnv->deserBufferPtr[thr]->pop();
 
                     duration_wait_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::high_resolution_clock::now() - start_wait).count();
