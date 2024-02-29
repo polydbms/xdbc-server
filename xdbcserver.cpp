@@ -62,13 +62,20 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
     //initialize read queues
     for (int i = 0; i < xdbcEnv.read_parallelism; i++) {
         FBQ_ptr q(new customQueue<int>);
-        xdbcEnv.readBufferPtr.push_back(q);
+        FPQ_ptr q2(new customQueue<Part>);
+
+
         //initially all buffers are free to write into
-        for (int j = i * (xdbcEnv.bufferpool_size / xdbcEnv.deser_parallelism);
-             j < (i + 1) * (xdbcEnv.bufferpool_size / xdbcEnv.deser_parallelism);
+        for (int j = i * (xdbcEnv.bufferpool_size / xdbcEnv.read_parallelism);
+             j < (i + 1) * (xdbcEnv.bufferpool_size / xdbcEnv.read_parallelism);
              j++)
             q->push(j);
+
+
+        xdbcEnv.readBufferPtr.push_back(q);
+        xdbcEnv.partPtr.push_back(q2);
     }
+
 
     //initialize deser queues
     for (int i = 0; i < xdbcEnv.deser_parallelism; i++) {
@@ -130,6 +137,7 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
 
     bool boostError = false;
     int emptyCtr = 0;
+    int readQ = 0;
 
 
     while (emptyCtr < xdbcEnv->compression_parallelism && !boostError) {
@@ -171,17 +179,17 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
             sendBuffer = boost::asio::buffer(bp[bufferId], headerPtr->totalSize + sizeof(Header));
 
             try {
-                auto start = std::chrono::high_resolution_clock::now();
 
                 totalSentBytes += boost::asio::write(socket, sendBuffer);
-
-
                 threadSentBuffers++;
                 totalSentBuffers.fetch_add(1);
-                //flagArr[bufferId].store(1);
-                //release buffer for reader
-                int readQueueId = bufferId % xdbcEnv->deser_parallelism;
-                xdbcEnv->deserBufferPtr[readQueueId]->push(bufferId);
+
+                //reset & release buffer for reader
+                //bp[bufferId].resize(xdbcEnv->buffer_size * xdbcEnv->tuple_size + sizeof(Header));
+                xdbcEnv->readBufferPtr[readQ]->push(bufferId);
+                readQ++;
+                if (readQ == xdbcEnv->read_parallelism)
+                    readQ = 0;
 
 
             } catch (const boost::system::system_error &e) {

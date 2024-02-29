@@ -6,7 +6,6 @@
 
 
 class CSVReader : public DataSource {
-    typedef std::shared_ptr<customQueue<std::vector<std::string>>> Q_ptr;
 
 public:
     CSVReader(RuntimeEnv &xdbcEnv, const std::string &tableName);
@@ -19,18 +18,15 @@ public:
 
 private:
 
-    int csvWriteToBp(int thr);
+    int readCSV(int thr);
 
-    int writeTuplesToBp(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
+    int deserializeCSV(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
 
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;
     std::vector<std::vector<std::byte>> &bp;
     RuntimeEnv *xdbcEnv;
     std::string tableName;
-    std::stack<struct Part> partStack;
-    std::mutex partStackMutex;
-    std::vector<Q_ptr> qs;
 
 };
 

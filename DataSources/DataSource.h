@@ -47,6 +47,7 @@ struct SchemaAttribute {
     int size;
 };
 typedef std::shared_ptr<customQueue<int>> FBQ_ptr;
+typedef std::shared_ptr<customQueue<Part>> FPQ_ptr;
 
 struct RuntimeEnv {
     long transfer_id;
@@ -74,6 +75,7 @@ struct RuntimeEnv {
     std::vector<FBQ_ptr> deserBufferPtr;
     std::vector<FBQ_ptr> compBufferPtr;
     std::vector<FBQ_ptr> sendBufferPtr;
+    std::vector<FPQ_ptr> partPtr;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
     std::vector<SchemaAttribute> schema;
