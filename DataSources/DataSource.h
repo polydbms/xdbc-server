@@ -70,7 +70,8 @@ struct RuntimeEnv {
     std::atomic<long long> deser_time;
     std::atomic<long long> network_time;
     std::atomic<long long> compression_time;
-    //std::vector<std::atomic<int>> *flagArrPtr;
+
+    std::vector<FBQ_ptr> moreBuffersQ;
     std::vector<FBQ_ptr> readBufferPtr;
     std::vector<FBQ_ptr> deserBufferPtr;
     std::vector<FBQ_ptr> compBufferPtr;

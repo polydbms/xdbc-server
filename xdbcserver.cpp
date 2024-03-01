@@ -74,7 +74,11 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
 
         xdbcEnv.readBufferPtr.push_back(q);
         xdbcEnv.partPtr.push_back(q2);
+        //initialize more buffers queue
+        FBQ_ptr mq(new customQueue<int>);
+        xdbcEnv.moreBuffersQ.push_back(mq);
     }
+
 
 
     //initialize deser queues
