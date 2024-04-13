@@ -15,13 +15,7 @@
 using namespace std;
 namespace po = boost::program_options;
 
-SchemaAttribute createSchemaAttribute(std::string name, std::string tpe, int size) {
-    SchemaAttribute att;
-    att.name = std::move(name);
-    att.tpe = std::move(tpe);
-    att.size = size;
-    return att;
-}
+
 
 void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
     // Declare the supported options.
@@ -120,16 +114,8 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
         env.transfer_id = vm["transfer-id"].as<long>();
     }
 
-    //create schema
-    std::vector<SchemaAttribute> schema;
-    schema.emplace_back(createSchemaAttribute("l_orderkey", "INT", 4));
-    schema.emplace_back(createSchemaAttribute("l_partkey", "INT", 4));
-    schema.emplace_back(createSchemaAttribute("l_suppkey", "INT", 4));
-    schema.emplace_back(createSchemaAttribute("l_linenumber", "INT", 4));
-    schema.emplace_back(createSchemaAttribute("l_quantity", "DOUBLE", 8));
-    schema.emplace_back(createSchemaAttribute("l_extendedprice", "DOUBLE", 8));
-    schema.emplace_back(createSchemaAttribute("l_discount", "DOUBLE", 8));
-    schema.emplace_back(createSchemaAttribute("l_tax", "DOUBLE", 8));
+    //schema creation in DataSource constructor
+    //TODO: move schema creation to client and send serialized schema over network
 
     env.read_time = 0;
     env.deser_time = 0;
@@ -141,7 +127,7 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
     env.compression_wait_time = 0;
     env.network_wait_time = 0;
 
-    env.schema = schema;
+
 
 }
 

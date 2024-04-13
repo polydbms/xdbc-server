@@ -43,13 +43,12 @@ CSVReader::CSVReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
         bp(*xdbcEnv.bpPtr),
         finishedReading(false),
         totalReadBuffers(0),
-        xdbcEnv(&xdbcEnv),
-        tableName(tableName) {
-
+        xdbcEnv(&xdbcEnv){
+    spdlog::get("XDBC.SERVER")->info("CSV Constructor called with table: {0}", tableName);
 }
 
 void CSVReader::readData() {
-    auto start = std::chrono::steady_clock::now();
+    auto start_read = std::chrono::steady_clock::now();
 
 
     int threadWrittenTuples[xdbcEnv->deser_parallelism];
@@ -97,6 +96,7 @@ void CSVReader::readData() {
     }
 
 
+    auto start_deser = std::chrono::steady_clock::now();
     for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
         threadWrittenTuples[i] = 0;
         threadWrittenBuffers[i] = 0;
@@ -116,6 +116,7 @@ void CSVReader::readData() {
         totalBuffers += threadWrittenBuffers[i];
     }
 
+
     for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
         readThreads[i].join();
     }
@@ -123,9 +124,16 @@ void CSVReader::readData() {
     finishedReading.store(true);
 
     auto end = std::chrono::steady_clock::now();
-    spdlog::get("XDBC.SERVER")->info("Deser | Elapsed time: {0} ms for #tuples: {1}, #buffers: {2}",
-                                     std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(),
+    auto total_read_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start_read).count();
+    auto total_deser_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start_deser).count();
+
+    xdbcEnv->read_time.fetch_add(total_read_time);
+    xdbcEnv->deser_time.fetch_add(total_deser_time);
+
+    spdlog::get("XDBC.SERVER")->info("Read+Deser | Elapsed time: {0} ms for #tuples: {1}, #buffers: {2}",
+                                     total_deser_time,
                                      totalTuples, totalBuffers);
+
 }
 
 int CSVReader::readCSV(int thr) {

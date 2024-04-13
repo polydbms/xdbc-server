@@ -26,7 +26,6 @@ private:
     std::atomic<int> totalReadBuffers;
     std::vector<std::vector<std::byte>> &bp;
     RuntimeEnv *xdbcEnv;
-    std::string tableName;
 
 };
 

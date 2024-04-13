@@ -107,6 +107,8 @@ private:
     std::atomic<int> totalReadBuffers;
     std::vector<std::vector<std::byte>> &bp;
     RuntimeEnv *xdbcEnv;
+
+protected:
     std::string tableName;
 
 };

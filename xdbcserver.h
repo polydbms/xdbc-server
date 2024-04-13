@@ -37,7 +37,6 @@ public:
 private:
     RuntimeEnv *xdbcEnv;
     std::vector<std::vector<std::byte>> bp;
-    //std::vector<std::atomic<int>> flagArr;
     std::atomic<int> totalSentBuffers;
     std::string tableName;
 

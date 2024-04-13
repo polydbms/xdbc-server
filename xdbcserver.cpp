@@ -242,6 +242,8 @@ int XDBCServer::serve() {
         ds = std::make_unique<CSVReader>(*xdbcEnv, tableName);
     }
 
+    spdlog::get("XDBC.SERVER")->info("Input table schema:\n{0}", ds->formatSchema(xdbcEnv->schema));
+
     t1 = std::thread([&ds]() {
         ds->readData();
     });
