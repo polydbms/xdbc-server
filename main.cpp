@@ -32,7 +32,7 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
              "Set buffer-size of buffers used to read data from the database.\nDefault: 1000")
             ("bufferpool-size,p", po::value<int>()->default_value(1000),
              "Set the amount of buffers used.\nDefault: 1000")
-            ("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
+            //("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
             ("sleep-time,s", po::value<int>()->default_value(5), "Set a sleep-time in milli seconds.\nDefault: 5ms")
             ("read-parallelism,rp", po::value<int>()->default_value(4), "Set the read parallelism grade.\nDefault: 4")
             ("read-partitions,rpp", po::value<int>()->default_value(1),
@@ -81,10 +81,10 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
         spdlog::get("XDBC.SERVER")->info("Bufferpool-size: {0}", vm["bufferpool-size"].as<int>());
         env.bufferpool_size = vm["bufferpool-size"].as<int>();
     }
-    if (vm.count("tuple-size")) {
+    /*if (vm.count("tuple-size")) {
         spdlog::get("XDBC.SERVER")->info("Tuple size: {0}", vm["tuple-size"].as<int>());
         env.tuple_size = vm["tuple-size"].as<int>();
-    }
+    }*/
     if (vm.count("sleep-time")) {
         spdlog::get("XDBC.SERVER")->info("Sleep time: {0}ms", vm["sleep-time"].as<int>());
         env.sleep_time = std::chrono::milliseconds(vm["sleep-time"].as<int>());

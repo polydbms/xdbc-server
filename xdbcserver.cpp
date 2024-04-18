@@ -6,7 +6,7 @@
 #include <boost/enable_shared_from_this.hpp>
 #include <boost/crc.hpp>
 #include <thread>
-#include <atomic>
+#include <numeric>
 
 #include "Compression/Compressor.h"
 #include "DataSources/PGReader/PGReader.h"
@@ -55,9 +55,6 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
           xdbcEnv(&xdbcEnv),
           totalSentBuffers(0),
           tableName() {
-
-    bp.resize(xdbcEnv.bufferpool_size,
-              std::vector<std::byte>(xdbcEnv.buffer_size * xdbcEnv.tuple_size + sizeof(Header)));
 
     //initialize read queues
     for (int i = 0; i < xdbcEnv.read_parallelism; i++) {
@@ -207,7 +204,16 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     spdlog::get("XDBC.SERVER")->info("Send thread {0} finished. Bytes {1}, #buffers {2} ",
                                      thr, totalSentBytes, threadSentBuffers);
 
-    socket.close();
+    boost::system::error_code ec;
+    socket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+    if (ec) {
+        spdlog::get("XDBC.SERVER")->error("Server send thread {0} shut down error: {1}", thr, ec.message());
+    }
+
+    socket.close(ec);
+    if (ec) {
+        spdlog::get("XDBC.SERVER")->error("Server send thread {0} close error: {1}", thr, ec.message());
+    }
 
     return 1;
 }
@@ -229,6 +235,7 @@ int XDBCServer::serve() {
 
     spdlog::get("XDBC.SERVER")->info("Client wants to read table {0} ", tableName);
 
+
     std::vector<thread> net_threads(xdbcEnv->network_parallelism);
     std::vector<thread> comp_threads(xdbcEnv->compression_parallelism);
     std::thread t1;
@@ -242,7 +249,16 @@ int XDBCServer::serve() {
         ds = std::make_unique<CSVReader>(*xdbcEnv, tableName);
     }
 
-    spdlog::get("XDBC.SERVER")->info("Input table schema:\n{0}", ds->formatSchema(xdbcEnv->schema));
+    xdbcEnv->tuple_size = std::accumulate(xdbcEnv->schema.begin(), xdbcEnv->schema.end(), 0,
+                                          [](int acc, const SchemaAttribute &attr) {
+                                              return acc + attr.size;
+                                          });
+
+    bp.resize(xdbcEnv->bufferpool_size,
+              std::vector<std::byte>(xdbcEnv->buffer_size * xdbcEnv->tuple_size + sizeof(Header)));
+
+    spdlog::get("XDBC.SERVER")->info("Input table tuple size: {0} with schema:\n{1}",
+                                     xdbcEnv->tuple_size, ds->formatSchema(xdbcEnv->schema));
 
     t1 = std::thread([&ds]() {
         ds->readData();
@@ -303,10 +319,20 @@ int XDBCServer::serve() {
 
 
     t1.join();
-    baseSocket.close();
+    boost::system::error_code ec;
+    baseSocket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
+    if (ec) {
+        spdlog::get("XDBC.SERVER")->error("Base socket shut down error: {0}", ec.message());
+    }
+
+    baseSocket.close(ec);
+    if (ec) {
+        spdlog::get("XDBC.SERVER")->error("Base socket close error: {0}", ec.message());
+    }
 
     return 1;
 }
+
 
 
 
