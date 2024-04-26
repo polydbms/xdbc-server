@@ -60,6 +60,6 @@ ADD Compression /xdbc-server/Compression
 ADD DataSources /xdbc-server/DataSources
 RUN ls /xdbc-server
 
-RUN rm -rf /xdbc-server/build && mkdir /xdbc-server/build && cd /xdbc-server/build && cmake .. && make -j8
+RUN rm -rf /xdbc-server/build && mkdir /xdbc-server/build && cd /xdbc-server/build && cmake .. -D CMAKE_BUILD_TYPE=Release && make -j8
 
 ENTRYPOINT ["tail", "-f", "/dev/null"]

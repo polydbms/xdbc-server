@@ -26,7 +26,9 @@ if [ $BUILD_OPTION == 1 ] || [ $BUILD_OPTION == 3 ]; then
 
 fi
 
+rm /tmp/server_exec.log
 # start
 if [[ $BUILD_OPTION != 3 ]]; then
-  docker exec -t $CONTAINER bash -c "cd xdbc-server/build && ./xdbc-server ${RUNPARAMS}"
+  #docker exec -t $CONTAINER bash -c "cd xdbc-server/build && ./xdbc-server ${RUNPARAMS}"
+  docker exec $CONTAINER bash -c "cd xdbc-server/build && nohup ./xdbc-server ${RUNPARAMS}" >> /tmp/server_exec.log 2>&1 &
 fi
