@@ -13,6 +13,7 @@ using namespace std;
 using namespace boost::asio;
 using ip::tcp;
 
+//TODO: refactor for new buffer_size -> tuples_per_buffer and deserialization method
 
 CHReader::CHReader(RuntimeEnv &xdbcEnv, const std::string tableName) :
         DataSource(xdbcEnv, tableName),

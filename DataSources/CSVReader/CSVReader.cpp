@@ -253,6 +253,7 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
     int bytesInTuple = 0;
     int celli = -1;
     double celld = -1;
+    char cellc = ' ';
     int compQ = 0;
     std::byte *startWritePtr;
     const char *startReadPtr;
@@ -304,7 +305,6 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                     std::chrono::high_resolution_clock::now() - start_wait).count();
             xdbcEnv->deser_wait_time.fetch_add(duration_wait_microseconds, std::memory_order_relaxed);
             writeBuffers.push(curBid);
-            int k = 1;
         }
 
         //define current read buffer & write buffer
@@ -339,7 +339,7 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                 if (xdbcEnv->iformat == 1) {
                     write = startWritePtr + bufferTupleId * xdbcEnv->tuple_size + bytesInTuple;
                 } else if (xdbcEnv->iformat == 2) {
-                    write = startWritePtr + bytesInTuple * xdbcEnv->buffer_size + bufferTupleId * attribute.size;
+                    write = startWritePtr + bytesInTuple * xdbcEnv->tuples_per_buffer + bufferTupleId * attribute.size;
                 }
 
                 if (attribute.tpe == "INT") {
@@ -348,6 +348,8 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                 } else if (attribute.tpe == "DOUBLE") {
                     std::from_chars(tmpPtr, tmpEnd, celld);
                     memcpy(write, &celld, 8);
+                } else if (attribute.tpe == "CHAR") {
+                    memcpy(write, tmpPtr, 1);
                 }
 
                 //TODO: add more types
@@ -358,7 +360,7 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
             bufferTupleId++;
             totalThreadWrittenTuples++;
 
-            if (bufferTupleId == xdbcEnv->buffer_size) {
+            if (bufferTupleId == xdbcEnv->tuples_per_buffer) {
                 bufferTupleId = 0;
 
                 totalThreadWrittenBuffers++;
@@ -379,20 +381,15 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
             readOffset = 0;
         }
     }
-
-    int k = tmpBuffers.size();
-    int bb = writeBuffers.size();
-
-
     //remaining tuples
-    if (bufferTupleId > 0 && bufferTupleId != xdbcEnv->buffer_size) {
+    if (bufferTupleId > 0 && bufferTupleId != xdbcEnv->tuples_per_buffer) {
         spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} has {1} remaining tuples",
-                                         thr, xdbcEnv->buffer_size - bufferTupleId);
+                                         thr, xdbcEnv->tuples_per_buffer - bufferTupleId);
 
         //TODO: remove dirty fix, potentially with buffer header or resizable buffers
         int mone = -1;
 
-        for (int i = bufferTupleId; i < xdbcEnv->buffer_size; i++) {
+        for (int i = bufferTupleId; i < xdbcEnv->tuples_per_buffer; i++) {
 
             void *writePtr;
             if (xdbcEnv->iformat == 1) {

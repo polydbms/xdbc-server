@@ -20,7 +20,18 @@ DataSource::DataSource(RuntimeEnv &xdbcEnv, std::string tbl) :
     spdlog::get("XDBC.SERVER")->info("Entered DataSource constructor for table {0}", tableName);
     //create schema
     std::vector<SchemaAttribute> schema;
-    if (tableName.find("lineitem") != std::string::npos) {
+    if (tableName.find("lineitem_half") != std::string::npos) {
+        schema.emplace_back(createSchemaAttribute("l_orderkey", "INT", 4));
+        schema.emplace_back(createSchemaAttribute("l_partkey", "INT", 4));
+        schema.emplace_back(createSchemaAttribute("l_suppkey", "INT", 4));
+        schema.emplace_back(createSchemaAttribute("l_linenumber", "INT", 4));
+        schema.emplace_back(createSchemaAttribute("l_quantity", "DOUBLE", 8));
+        schema.emplace_back(createSchemaAttribute("l_extendedprice", "DOUBLE", 8));
+        schema.emplace_back(createSchemaAttribute("l_discount", "DOUBLE", 8));
+        schema.emplace_back(createSchemaAttribute("l_tax", "DOUBLE", 8));
+        schema.emplace_back(createSchemaAttribute("l_returnflag", "CHAR", 1));
+        schema.emplace_back(createSchemaAttribute("l_linestatus", "CHAR", 1));
+    } else if (tableName.find("lineitem") != std::string::npos) {
         schema.emplace_back(createSchemaAttribute("l_orderkey", "INT", 4));
         schema.emplace_back(createSchemaAttribute("l_partkey", "INT", 4));
         schema.emplace_back(createSchemaAttribute("l_suppkey", "INT", 4));

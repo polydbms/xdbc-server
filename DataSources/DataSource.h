@@ -54,6 +54,7 @@ struct RuntimeEnv {
     std::string compression_algorithm;
     int iformat;
     int buffer_size;
+    int tuples_per_buffer;
     int bufferpool_size;
     int tuple_size;
     std::chrono::milliseconds sleep_time;

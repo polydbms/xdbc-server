@@ -16,7 +16,6 @@ using namespace std;
 namespace po = boost::program_options;
 
 
-
 void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
     // Declare the supported options.
     po::options_description desc("Usage: ./xdbc-server [options]\n\nAllowed options");
@@ -28,8 +27,8 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
              "Set Compression algorithm: \nDefault:\n  nocomp\nOther:\n  zstd\n  snappy\n  lzo\n  lz4\n zlib\n cols")
             ("intermediate-format,f", po::value<int>()->default_value(1),
              "Set intermediate-format: \nDefault:\n  1 (row)\nOther:\n  2 (col)")
-            ("buffer-size,b", po::value<int>()->default_value(1000),
-             "Set buffer-size of buffers used to read data from the database.\nDefault: 1000")
+            ("buffer-size,b", po::value<int>()->default_value(64),
+             "Set buffer-size of buffers used to read data from storage (in bytes).\nDefault: 64")
             ("bufferpool-size,p", po::value<int>()->default_value(1000),
              "Set the amount of buffers used.\nDefault: 1000")
             //("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
@@ -74,8 +73,8 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
         env.compression_algorithm = vm["compression-type"].as<string>();
     }
     if (vm.count("buffer-size")) {
-        spdlog::get("XDBC.SERVER")->info("Buffer-size: {0}", vm["buffer-size"].as<int>());
-        env.buffer_size = vm["buffer-size"].as<int>();
+        spdlog::get("XDBC.SERVER")->info("Buffer-size: {0} kilobytes", vm["buffer-size"].as<int>());
+        env.buffer_size = vm["buffer-size"].as<int>() * 1000;
     }
     if (vm.count("bufferpool-size")) {
         spdlog::get("XDBC.SERVER")->info("Bufferpool-size: {0}", vm["bufferpool-size"].as<int>());
@@ -126,7 +125,8 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
     env.deser_wait_time = 0;
     env.compression_wait_time = 0;
     env.network_wait_time = 0;
-
+    env.tuple_size = 0;
+    env.tuples_per_buffer = 0;
 
 
 }

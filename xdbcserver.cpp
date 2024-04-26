@@ -102,8 +102,8 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
 
     xdbcEnv.bpPtr = &bp;
 
-    spdlog::get("XDBC.SERVER")->info("Created XDBC Server with BPS: {0} buffers, BS: {1} bytes, TS: {2} bytes",
-                                     bp.size(), xdbcEnv.buffer_size * xdbcEnv.tuple_size, xdbcEnv.tuple_size);
+    spdlog::get("XDBC.SERVER")->info("Created XDBC Server with BPS: {0} buffers, BS: {1} bytes",
+                                     bp.size(), xdbcEnv.buffer_size);
 
 }
 
@@ -261,9 +261,10 @@ int XDBCServer::serve() {
                                           [](int acc, const SchemaAttribute &attr) {
                                               return acc + attr.size;
                                           });
+    xdbcEnv->tuples_per_buffer = xdbcEnv->buffer_size / xdbcEnv->bufferpool_size;
 
     bp.resize(xdbcEnv->bufferpool_size,
-              std::vector<std::byte>(xdbcEnv->buffer_size * xdbcEnv->tuple_size + sizeof(Header)));
+              std::vector<std::byte>(xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size + sizeof(Header)));
 
     spdlog::get("XDBC.SERVER")->info("Input table tuple size: {0} with schema:\n{1}",
                                      xdbcEnv->tuple_size, ds->formatSchema(xdbcEnv->schema));

@@ -45,14 +45,14 @@ void Compressor::compress(int thr, const std::string &compName) {
 
             std::array<size_t, MAX_ATTRIBUTES> compressed_sizes = Compressor::compress_buffer(
                     xdbcEnv->compression_algorithm, bp[bufferId].data(), bp[bufferId].data() + sizeof(Header),
-                    xdbcEnv->buffer_size * xdbcEnv->tuple_size,
-                    xdbcEnv->buffer_size, xdbcEnv->schema);
+                    xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size,
+                    xdbcEnv->tuples_per_buffer, xdbcEnv->schema);
 
             size_t totalSize = 0;
             //TODO: check if schema larger than MAX_ATTRIBUTES
 
             if (xdbcEnv->compression_algorithm == "cols" &&
-                compressed_sizes[0] == xdbcEnv->buffer_size * xdbcEnv->tuple_size)
+                compressed_sizes[0] == xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size)
                 totalSize = compressed_sizes[0];
             else {
                 for (int i = 0; i < xdbcEnv->schema.size(); i++) {
@@ -60,11 +60,11 @@ void Compressor::compress(int thr, const std::string &compName) {
                 }
             }
 
-            if (totalSize > xdbcEnv->buffer_size * xdbcEnv->tuple_size) {
+            if (totalSize > xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size) {
                 spdlog::get("XDBC.SERVER")->warn("Compress thread {0} compression more than buffer", thr);
                 compId = 0;
             }
-            if (totalSize == xdbcEnv->buffer_size * xdbcEnv->tuple_size) {
+            if (totalSize == xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size) {
                 compId = 0;
             }
 
@@ -416,6 +416,7 @@ std::array<size_t, MAX_ATTRIBUTES> Compressor::compress_cols(void *src, void *ds
 
             //compressedDataSize += 8 * buffer_size;
         }
+        //TODO: add more attributes (CHAR)
         compressedColumns[attributeNum] = compressedDataSize;
         totalSize += compressedDataSize;
         attributeNum++;

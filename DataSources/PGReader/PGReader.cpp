@@ -16,6 +16,8 @@ using namespace pqxx;
 using namespace boost::asio;
 using ip::tcp;
 
+//TODO: refactor for new buffer_size -> tuples_per_buffer and deserialization method
+
 std::vector<std::string> splitStr(std::string const &original, char separator) {
     std::vector<std::string> results;
     std::string::const_iterator start = original.begin();
