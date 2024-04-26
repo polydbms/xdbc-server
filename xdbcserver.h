@@ -14,7 +14,7 @@
 using namespace boost::asio;
 using ip::tcp;
 
-constexpr size_t MAX_ATTRIBUTES = 10;
+constexpr size_t MAX_ATTRIBUTES = 230;
 struct Header {
 
     size_t compressionType;

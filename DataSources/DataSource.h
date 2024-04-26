@@ -80,6 +80,7 @@ struct RuntimeEnv {
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
     std::vector<SchemaAttribute> schema;
+    std::vector<FBQ_ptr> sendThreadReady;
 };
 
 class DataSource {

@@ -43,7 +43,7 @@ CSVReader::CSVReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
         bp(*xdbcEnv.bpPtr),
         finishedReading(false),
         totalReadBuffers(0),
-        xdbcEnv(&xdbcEnv){
+        xdbcEnv(&xdbcEnv) {
     spdlog::get("XDBC.SERVER")->info("CSV Constructor called with table: {0}", tableName);
 }
 
@@ -229,7 +229,6 @@ int CSVReader::readCSV(int thr) {
             xdbcEnv->read_wait_time.fetch_add(duration_wait_microseconds, std::memory_order_relaxed);
             xdbcEnv->deserBufferPtr[requestThrId]->push(curBid);
 
-            int bla = 0;
         }
 
 

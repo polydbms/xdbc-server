@@ -94,6 +94,9 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
     for (int i = 0; i < xdbcEnv.network_parallelism; i++) {
         FBQ_ptr q(new customQueue<int>);
         xdbcEnv.sendBufferPtr.push_back(q);
+        //initialize send thread flags
+        FBQ_ptr q1(new customQueue<int>);
+        xdbcEnv.sendThreadReady.push_back(q1);
     }
 
 
@@ -106,12 +109,17 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
 
 int XDBCServer::send(int thr, DataSource &dataReader) {
 
+    //spdlog::get("XDBC.SERVER")->info("Entered send thread: {0}", thr);
     int port = 1234 + thr + 1;
     boost::asio::io_context ioContext;
     boost::asio::ip::tcp::acceptor listenerAcceptor(ioContext,
                                                     boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(),
                                                                                    port));
     boost::asio::ip::tcp::socket socket(ioContext);
+
+    //let main thread know socket is ready
+    xdbcEnv->sendThreadReady[thr]->push(1);
+
     listenerAcceptor.accept(socket);
 
     spdlog::get("XDBC.SERVER")->info("Send thread {0} accepting on port: {1}", thr, port);
@@ -281,7 +289,14 @@ int XDBCServer::serve() {
     for (int i = 0; i < xdbcEnv->network_parallelism; i++) {
         net_threads[i] = std::thread(&XDBCServer::send, this, i, std::ref(*ds));
     }
-
+    //check that sockets are ready
+    int acc = 0;
+    int sendThreadReadyQ = 0;
+    while (acc != xdbcEnv->network_parallelism) {
+        acc += xdbcEnv->sendThreadReady[sendThreadReadyQ]->pop();
+        spdlog::get("XDBC.SERVER")->info("Send threads ready: {0}/{1} ", acc, xdbcEnv->sendThreadReady.size());
+        sendThreadReadyQ = (sendThreadReadyQ + 1) % xdbcEnv->network_parallelism;
+    }
 
     spdlog::get("XDBC.SERVER")->info("Created send threads: {0} ", xdbcEnv->network_parallelism);
 
