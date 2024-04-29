@@ -416,7 +416,7 @@ std::array<size_t, MAX_ATTRIBUTES> Compressor::compress_cols(void *src, void *ds
 
             //compressedDataSize += 8 * buffer_size;
         }
-        //TODO: add more attributes (CHAR)
+        //TODO: add more attributes (CHAR, STRING)
         compressedColumns[attributeNum] = compressedDataSize;
         totalSize += compressedDataSize;
         attributeNum++;

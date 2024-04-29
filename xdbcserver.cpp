@@ -242,6 +242,13 @@ int XDBCServer::serve() {
     tableName.erase(std::remove(tableName.begin(), tableName.end(), '\n'), tableName.cend());
 
     spdlog::get("XDBC.SERVER")->info("Client wants to read table {0} ", tableName);
+    std::uint32_t dataSize = 0;
+    size_t len = boost::asio::read(baseSocket, boost::asio::buffer(&dataSize, sizeof(dataSize)));
+    std::vector<char> schemaJSONstr(dataSize);
+    len = boost::asio::read(baseSocket, boost::asio::buffer(schemaJSONstr.data(), dataSize));
+    xdbcEnv->schemaJSON = std::string(schemaJSONstr.begin(), schemaJSONstr.end());
+
+    spdlog::get("XDBC.SERVER")->info("Got schema {0}", xdbcEnv->schemaJSON);
 
 
     std::vector<thread> net_threads(xdbcEnv->network_parallelism);

@@ -350,6 +350,10 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                     memcpy(write, &celld, 8);
                 } else if (attribute.tpe == "CHAR") {
                     memcpy(write, tmpPtr, 1);
+                } else if (attribute.tpe == "STRING") {
+                    memset(write, 0, attribute.size);
+                    memcpy(write, tmpPtr, len);
+                    //TODO: maybe \0 termination
                 }
 
                 //TODO: add more types
@@ -376,7 +380,6 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
 
         }
         if (readOffset >= curReadBufferRef.size()) {
-            size_t bla = tmpBuffers.size();
             tmpBuffers.pop();
             readOffset = 0;
         }
