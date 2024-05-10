@@ -28,9 +28,9 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
             ("intermediate-format,f", po::value<int>()->default_value(1),
              "Set intermediate-format: \nDefault:\n  1 (row)\nOther:\n  2 (col)")
             ("buffer-size,b", po::value<int>()->default_value(64),
-             "Set buffer-size of buffers used to read data from storage (in bytes).\nDefault: 64")
-            ("bufferpool-size,p", po::value<int>()->default_value(1000),
-             "Set the amount of buffers used.\nDefault: 1000")
+             "Set buffer-size of buffers (in KiB).\nDefault: 64")
+            ("bufferpool-size,p", po::value<int>()->default_value(4096),
+             "Set bufferpool memory size (in KiB).\nDefault: 4096")
             //("tuple-size,t", po::value<int>()->default_value(48), "Set the tuple size.\nDefault: 48")
             ("sleep-time,s", po::value<int>()->default_value(5), "Set a sleep-time in milli seconds.\nDefault: 5ms")
             ("read-parallelism,rp", po::value<int>()->default_value(4), "Set the read parallelism grade.\nDefault: 4")
@@ -73,12 +73,13 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
         env.compression_algorithm = vm["compression-type"].as<string>();
     }
     if (vm.count("buffer-size")) {
-        spdlog::get("XDBC.SERVER")->info("Buffer-size: {0} kilobytes", vm["buffer-size"].as<int>());
-        env.buffer_size = vm["buffer-size"].as<int>() * 1000;
+        spdlog::get("XDBC.SERVER")->info("Buffer-size: {0} KiB", vm["buffer-size"].as<int>());
+        env.buffer_size = vm["buffer-size"].as<int>();
     }
     if (vm.count("bufferpool-size")) {
-        spdlog::get("XDBC.SERVER")->info("Bufferpool-size: {0}", vm["bufferpool-size"].as<int>());
-        env.bufferpool_size = vm["bufferpool-size"].as<int>();
+        spdlog::get("XDBC.SERVER")->info("Bufferpool-size: {0} KiB", vm["bufferpool-size"].as<int>());
+        env.buffers_in_bufferpool = vm["bufferpool-size"].as<int>() / vm["buffer-size"].as<int>();
+        spdlog::get("XDBC.SERVER")->info("Buffers in Bufferpool: {0}", env.buffers_in_bufferpool);
     }
     /*if (vm.count("tuple-size")) {
         spdlog::get("XDBC.SERVER")->info("Tuple size: {0}", vm["tuple-size"].as<int>());

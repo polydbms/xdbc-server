@@ -63,8 +63,8 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
 
 
         //initially all buffers are free to write into
-        for (int j = i * (xdbcEnv.bufferpool_size / xdbcEnv.read_parallelism);
-             j < (i + 1) * (xdbcEnv.bufferpool_size / xdbcEnv.read_parallelism);
+        for (int j = i * (xdbcEnv.buffers_in_bufferpool / xdbcEnv.read_parallelism);
+             j < (i + 1) * (xdbcEnv.buffers_in_bufferpool / xdbcEnv.read_parallelism);
              j++)
             q->push(j);
 
@@ -128,8 +128,8 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     readThreadId.erase(std::remove(readThreadId.begin(), readThreadId.end(), '\n'), readThreadId.cend());
 
     //decide partitioning
-    int minBId = thr * (xdbcEnv->bufferpool_size / xdbcEnv->network_parallelism);
-    int maxBId = (thr + 1) * (xdbcEnv->bufferpool_size / xdbcEnv->network_parallelism);
+    int minBId = thr * (xdbcEnv->buffers_in_bufferpool / xdbcEnv->network_parallelism);
+    int maxBId = (thr + 1) * (xdbcEnv->buffers_in_bufferpool / xdbcEnv->network_parallelism);
 
     //int minBId = 0;
     //int maxBId = xdbcEnv.bufferpool_size;
@@ -192,13 +192,35 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
                 totalSentBytes += boost::asio::write(socket, sendBuffer);
                 threadSentBuffers++;
                 totalSentBuffers.fetch_add(1);
+                //spdlog::get("XDBC.SERVER")->info("total sent: {0}", totalSentBuffers);
 
                 //reset & release buffer for reader
                 //bp[bufferId].resize(xdbcEnv->buffer_size * xdbcEnv->tuple_size + sizeof(Header));
-                xdbcEnv->readBufferPtr[readQ]->push(bufferId);
-                readQ++;
-                if (readQ == xdbcEnv->read_parallelism)
-                    readQ = 0;
+                int checkedThreads = 0;
+
+                // Cycle through the read queues in a round-robin fashion
+                while (checkedThreads < xdbcEnv->read_parallelism) {
+                    // Check if the current thread pointed to by readQ is active
+                    if (xdbcEnv->activeReadThreads[readQ]) {
+                        // If the thread is active, send the buffer to this thread's queue
+                        xdbcEnv->readBufferPtr[readQ]->push(bufferId);
+                        //spdlog::get("XDBC.SERVER")->info("Send thread {0} sending buff {1} to readQ {2}",
+                        // thr, bufferId, readQ);
+
+                        // Move to the next queue
+                        readQ = (readQ + 1) % xdbcEnv->read_parallelism;
+                        break; // Exit after successfully sending the buffer
+                    } else {
+                        // If the thread is not active, just move to the next queue
+                        readQ = (readQ + 1) % xdbcEnv->read_parallelism;
+                        checkedThreads++; // Increment the number of checked threads
+                    }
+                }
+                // Optionally handle the case where all threads are inactive
+                if (checkedThreads == xdbcEnv->read_parallelism) {
+                    spdlog::get("XDBC.SERVER")->info("All threads are inactive. Buffer {0} by thread {1} not sent",
+                                                     bufferId, thr);
+                }
 
 
             } catch (const boost::system::system_error &e) {
@@ -237,18 +259,25 @@ int XDBCServer::serve() {
     acceptor.accept(baseSocket);
 
     //read operation
-    tableName = read_(baseSocket);
 
-    tableName.erase(std::remove(tableName.begin(), tableName.end(), '\n'), tableName.cend());
-
-    spdlog::get("XDBC.SERVER")->info("Client wants to read table {0} ", tableName);
     std::uint32_t dataSize = 0;
     size_t len = boost::asio::read(baseSocket, boost::asio::buffer(&dataSize, sizeof(dataSize)));
+    std::vector<char> tableNameStr(dataSize);
+    boost::asio::read(baseSocket, boost::asio::buffer(tableNameStr.data(), dataSize));
+    tableName = std::string(tableNameStr.begin(), tableNameStr.end());
+    //tableName = read_(baseSocket);
+
+    //tableName.erase(std::remove(tableName.begin(), tableName.end(), '\n'), tableName.cend());
+
+    spdlog::get("XDBC.SERVER")->info("Client wants to read table {0} ", tableName);
+
+    dataSize = 0;
+    len = boost::asio::read(baseSocket, boost::asio::buffer(&dataSize, sizeof(dataSize)));
     std::vector<char> schemaJSONstr(dataSize);
     len = boost::asio::read(baseSocket, boost::asio::buffer(schemaJSONstr.data(), dataSize));
     xdbcEnv->schemaJSON = std::string(schemaJSONstr.begin(), schemaJSONstr.end());
 
-    spdlog::get("XDBC.SERVER")->info("Got schema {0}", xdbcEnv->schemaJSON);
+    //spdlog::get("XDBC.SERVER")->info("Got schema {0}", xdbcEnv->schemaJSON);
 
 
     std::vector<thread> net_threads(xdbcEnv->network_parallelism);
@@ -268,11 +297,11 @@ int XDBCServer::serve() {
                                           [](int acc, const SchemaAttribute &attr) {
                                               return acc + attr.size;
                                           });
-    xdbcEnv->tuples_per_buffer = xdbcEnv->buffer_size / xdbcEnv->bufferpool_size;
+    xdbcEnv->tuples_per_buffer = xdbcEnv->buffer_size * 1024 / xdbcEnv->tuple_size;
 
-    bp.resize(xdbcEnv->bufferpool_size,
+    bp.resize(xdbcEnv->buffers_in_bufferpool,
               std::vector<std::byte>(xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size + sizeof(Header)));
-
+    spdlog::get("XDBC.SERVER")->info("Tuples per buffer: {0}", xdbcEnv->tuples_per_buffer);
     spdlog::get("XDBC.SERVER")->info("Input table tuple size: {0} with schema:\n{1}",
                                      xdbcEnv->tuple_size, ds->formatSchema(xdbcEnv->schema));
 

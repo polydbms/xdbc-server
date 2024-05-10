@@ -183,7 +183,7 @@ int PGReader::read_pqxx_stream() {
 
             bufferId++;
 
-            if (bufferId == xdbcEnv->bufferpool_size)
+            if (bufferId == xdbcEnv->buffers_in_bufferpool)
                 bufferId = 0;
 
         }
@@ -318,7 +318,7 @@ int PGReader::read_pq_exec() {
 
             bufferId++;
 
-            if (bufferId == xdbcEnv->bufferpool_size)
+            if (bufferId == xdbcEnv->buffers_in_bufferpool)
                 bufferId = 0;
 
         }

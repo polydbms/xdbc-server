@@ -129,8 +129,8 @@ int CHReader::getMaxRowNum(const string &tableName) {
 
 int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers) {
 
-    int minBId = thr * (xdbcEnv->bufferpool_size / xdbcEnv->read_parallelism);
-    int maxBId = (thr + 1) * (xdbcEnv->bufferpool_size / xdbcEnv->read_parallelism);
+    int minBId = thr * (xdbcEnv->buffers_in_bufferpool / xdbcEnv->read_parallelism);
+    int maxBId = (thr + 1) * (xdbcEnv->buffers_in_bufferpool / xdbcEnv->read_parallelism);
 
     spdlog::get("XDBC.SERVER")->info("CH thread {0} assigned ({1},{2})", thr, minBId, maxBId);
 

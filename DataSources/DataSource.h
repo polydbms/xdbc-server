@@ -55,7 +55,7 @@ struct RuntimeEnv {
     int iformat;
     int buffer_size;
     int tuples_per_buffer;
-    int bufferpool_size;
+    int buffers_in_bufferpool;
     int tuple_size;
     std::chrono::milliseconds sleep_time;
     int read_partitions;
@@ -78,6 +78,7 @@ struct RuntimeEnv {
     std::vector<FBQ_ptr> compBufferPtr;
     std::vector<FBQ_ptr> sendBufferPtr;
     std::vector<FPQ_ptr> partPtr;
+    std::vector<bool> activeReadThreads;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
     std::vector<SchemaAttribute> schema;
