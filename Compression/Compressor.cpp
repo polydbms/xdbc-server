@@ -21,6 +21,9 @@ void Compressor::compress(int thr, const std::string &compName) {
     int emptyCtr = 0;
     int bufferId;
     int netQ = 0;
+    long compressedBuffers = 0;
+
+    auto start_profiling = std::chrono::high_resolution_clock::now();
 
     while (emptyCtr < xdbcEnv->deser_parallelism) {
         auto start_wait = std::chrono::high_resolution_clock::now();
@@ -86,6 +89,17 @@ void Compressor::compress(int thr, const std::string &compName) {
             std::copy(compressed_sizes.begin(), compressed_sizes.end(), head.attributeSize);
             std::memcpy(bp[bufferId].data(), &head, sizeof(Header));
             xdbcEnv->sendBufferPtr[netQ]->push(bufferId);
+
+            compressedBuffers++;
+            if (compressedBuffers > 0 && compressedBuffers % xdbcEnv->profilingBufferCnt == 0) {
+                auto duration_profiling = std::chrono::duration_cast<std::chrono::microseconds>(
+                        std::chrono::high_resolution_clock::now() - start_profiling).count();
+                xdbcEnv->profilingInfo.insert({"comp", duration_profiling});
+                start_profiling = std::chrono::high_resolution_clock::now();
+                /*spdlog::get("XDBC.SERVER")->info("Comp thr {0} profiling {1} ms per {2} buffs", thr,
+                                                 duration_profiling, xdbcEnv->profilingBufferCnt);*/
+            }
+
             netQ++;
             if (netQ == xdbcEnv->network_parallelism)
                 netQ = 0;

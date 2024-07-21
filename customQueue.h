@@ -24,4 +24,9 @@ public:
         this->d_queue.pop_back();
         return rc;
     }
+
+    [[nodiscard]] size_t size() const {
+        //std::unique_lock<std::mutex> lock(this->d_mutex);
+        return d_queue.size();
+    }
 };

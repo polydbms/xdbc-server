@@ -22,7 +22,7 @@ if [ $BUILD_OPTION == 1 ] || [ $BUILD_OPTION == 3 ]; then
   docker cp ${DIR}/DataSources/ $CONTAINER:/xdbc-server/
 
   #build
-  docker exec $CONTAINER bash -c "cd xdbc-server && rm -rf build/ && mkdir build && cd build && cmake .. && make -j8"
+  docker exec $CONTAINER bash -c "cd xdbc-server && rm -rf build/ && mkdir build && cd build && cmake -DCMAKE_BUILD_TYPE=Release .. && make -j8"
 
 fi
 

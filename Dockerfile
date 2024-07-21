@@ -10,7 +10,7 @@ RUN apt-get upgrade -qy
 
 # install dependencies
 
-RUN apt install -qy clang libboost-all-dev cmake build-essential git libspdlog-dev gdb nlohmann-json3-dev
+RUN apt install -qy clang libboost-all-dev cmake build-essential git libspdlog-dev gdb nlohmann-json3-dev iproute2 netcat
 
 #RUN git clone https://github.com/gabime/spdlog.git && cd spdlog && mkdir build && cd build &&  cmake .. && make -j && make install
 
@@ -60,6 +60,7 @@ ADD Compression /xdbc-server/Compression
 ADD DataSources /xdbc-server/DataSources
 RUN ls /xdbc-server
 
+RUN rm -rf  /xdbc-server/CMakeCache.txt
 RUN rm -rf /xdbc-server/build && mkdir /xdbc-server/build && cd /xdbc-server/build && cmake .. -D CMAKE_BUILD_TYPE=Release && make -j8
 
 ENTRYPOINT ["tail", "-f", "/dev/null"]
