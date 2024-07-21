@@ -5,6 +5,7 @@
 #include <atomic>
 #include <vector>
 #include <chrono>
+#include <map>
 #include "../customQueue.h"
 
 //#define BUFFER_SIZE 1000
@@ -84,6 +85,11 @@ struct RuntimeEnv {
     std::vector<SchemaAttribute> schema;
     std::string schemaJSON;
     std::vector<FBQ_ptr> sendThreadReady;
+    std::multimap<std::string, long> profilingInfo;
+    int profilingBufferCnt;
+    std::vector<std::tuple<long long, size_t, size_t, size_t, size_t>> queueSizes;
+    std::atomic<bool> monitor;
+
 };
 
 class DataSource {
@@ -105,6 +111,8 @@ public:
     std::string formatSchema(const std::vector<SchemaAttribute> &schema);
 
     std::string getAttributesAsStr(const std::vector<SchemaAttribute> &schema);
+
+    static int getSchemaSize(const std::vector<SchemaAttribute> &schema);
 
 private:
     std::atomic<bool> finishedReading;

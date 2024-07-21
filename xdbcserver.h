@@ -39,7 +39,9 @@ private:
     std::vector<std::vector<std::byte>> bp;
     std::atomic<int> totalSentBuffers;
     std::string tableName;
+    std::thread _monitorThread;
 
+    void monitorQueues(int interval_ms);
 };
 
 

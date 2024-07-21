@@ -98,3 +98,11 @@ std::string DataSource::getAttributesAsStr(const std::vector<SchemaAttribute> &s
     }
     return result;
 }
+
+int DataSource::getSchemaSize(const std::vector<SchemaAttribute> &schema) {
+    int size = 0;
+    for (const auto &tuple: schema) {
+        size += tuple.size;
+    }
+    return size;
+}

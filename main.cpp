@@ -43,7 +43,9 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
             ("compression-parallelism,cp", po::value<int>()->default_value(1),
              "Set the compression parallelism grade.\nDefault: 1")
             ("transfer-id,tid", po::value<long>()->default_value(0),
-             "Set the transfer id.\nDefault: 0");
+             "Set the transfer id.\nDefault: 0")
+            ("profiling-breakpoint", po::value<int>()->default_value(100),
+             "Set profiling breakpoint.\nDefault: 100");
 
     po::positional_options_description p;
     p.add("compression-type", 1);
@@ -113,6 +115,10 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
         spdlog::get("XDBC.SERVER")->info("Transfer id: {0}", vm["transfer-id"].as<long>());
         env.transfer_id = vm["transfer-id"].as<long>();
     }
+    if (vm.count("profiling-breakpoint")) {
+        spdlog::get("XDBC.SERVER")->info("Profiling Breakpoint: {0}", vm["profiling-breakpoint"].as<int>());
+        env.profilingBufferCnt = vm["profiling-breakpoint"].as<int>();
+    }
 
     //schema creation in DataSource constructor
     //TODO: move schema creation to client and send serialized schema over network
@@ -130,6 +136,37 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
     env.tuples_per_buffer = 0;
 
 
+}
+
+void printAverageLoad(RuntimeEnv &_xdbcenv) {
+    long long totalTimestamps = 0;
+    size_t totalReadBufferIdsSize = 0;
+    size_t totalDeserBufferIdsSize = 0;
+    size_t totalCompressedBufferIdsSize = 0;
+    size_t totalNetworkBufferIdsSize = 0;
+    size_t recordCount = _xdbcenv.queueSizes.size();
+
+    for (const auto &record: _xdbcenv.queueSizes) {
+        totalTimestamps += std::get<0>(record);
+        totalReadBufferIdsSize += std::get<1>(record);
+        totalDeserBufferIdsSize += std::get<2>(record);
+        totalCompressedBufferIdsSize += std::get<3>(record);
+        totalNetworkBufferIdsSize += std::get<4>(record);
+    }
+
+    if (recordCount > 0) {
+        double avgReadBufferIdsSize = static_cast<double>(totalReadBufferIdsSize) / recordCount;
+        double avgDeserBufferIdsSize = static_cast<double>(totalDeserBufferIdsSize) / recordCount;
+        double avgCompressedBufferIdsSize = static_cast<double>(totalDeserBufferIdsSize) / recordCount;
+        double avgNetworkBufferIdsSize = static_cast<double>(totalNetworkBufferIdsSize) / recordCount;
+
+        spdlog::get("XDBC.SERVER")->info("Average Load of Queues: Reader, Deserializer, Compressor, Sender");
+        spdlog::get("XDBC.SERVER")->info("{0}\t{1}\t{2}\t{3}",
+                                         avgReadBufferIdsSize, avgDeserBufferIdsSize,
+                                         avgCompressedBufferIdsSize, avgNetworkBufferIdsSize);
+    } else {
+        spdlog::get("XDBC.SERVER")->info("No records available to calculate averages.");
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -204,6 +241,59 @@ int main(int argc, char *argv[]) {
     spdlog::get("XDBC.SERVER")->info(
             "{0} | read wait time: {1} ms, deser wait time: {2} ms, compress wait time {3} ms, network wait time {4} ms",
             op, read_wait_time, deser_wait_time, cmp_wait_time, net_wait_time);
+
+
+    //Compute profiling info
+    std::map<std::string, long long> totalDurations;
+    std::map<std::string, int> countEntries;
+
+    for (const auto &entry: xdbcEnv.profilingInfo) {
+        totalDurations[entry.first] += entry.second;
+        countEntries[entry.first]++;
+    }
+
+    // Compute and print throughput for each component
+    for (const auto &component: totalDurations) {
+        const std::string &key = component.first;
+        long long totalDuration = component.second; // Total duration in microseconds
+        int count = countEntries[key]; // Number of entries
+
+        // Calculate total data size in bytes
+        double totalDataSizeBytes =
+                static_cast<double>(count) * xdbcEnv.profilingBufferCnt * (xdbcEnv.buffer_size * 1024);
+
+        // Convert total data size to MB
+        double totalDataSizeMB = totalDataSizeBytes / 1e6;
+
+        // Convert total duration to seconds
+        double totalDurationSeconds = totalDuration / 1e6;
+
+        // Calculate throughput in MB/s
+        double throughput = totalDataSizeMB / totalDurationSeconds;
+
+        if (key == "read")
+            throughput *= xdbcEnv.read_parallelism;
+        else if (key == "deser")
+            throughput *= xdbcEnv.deser_parallelism;
+        else if (key == "comp")
+            throughput *= xdbcEnv.compression_parallelism;
+        else if (key == "send")
+            throughput *= xdbcEnv.network_parallelism;
+
+        spdlog::get("XDBC.SERVER")->info("Component: {0}, throughput {1} MB/s", key, throughput);
+    }
+
+    /* std::cout << "Timestamp\tReadBufferIdsSize\tDeserBufferIdsSize\tCompressedBufferIdsSize\tNetworkBufferIdsSize"
+               << std::endl;
+     for (const auto &record: xdbcEnv.queueSizes) {
+         std::cout << std::get<0>(record) << "\t"
+                   << std::get<1>(record) << "\t"
+                   << std::get<2>(record) << "\t"
+                   << std::get<3>(record) << "\t"
+                   << std::get<4>(record) << std::endl;
+     }*/
+    printAverageLoad(xdbcEnv);
+
 
     std::ofstream csv_file("/tmp/xdbc_server_timings.csv",
                            std::ios::out | std::ios::app);
