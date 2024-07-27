@@ -255,12 +255,19 @@ int main(int argc, char *argv[]) {
     // Compute and print throughput for each component
     for (const auto &component: totalDurations) {
         const std::string &key = component.first;
-        long long totalDuration = component.second; // Total duration in microseconds
-        int count = countEntries[key]; // Number of entries
+        long long totalDuration = component.second;
+        int count = countEntries[key];
 
         // Calculate total data size in bytes
-        double totalDataSizeBytes =
-                static_cast<double>(count) * xdbcEnv.profilingBufferCnt * (xdbcEnv.buffer_size * 1024);
+        double totalDataSizeBytes;
+        if (key.rfind("_buffer") == (key.length() - key.length())) {
+            totalDataSizeBytes =
+                    static_cast<double>(count) * (xdbcEnv.buffer_size * 1024);
+        } else {
+
+            totalDataSizeBytes =
+                    static_cast<double>(count) * xdbcEnv.profilingBufferCnt * (xdbcEnv.buffer_size * 1024);
+        }
 
         // Convert total data size to MB
         double totalDataSizeMB = totalDataSizeBytes / 1e6;
@@ -280,7 +287,7 @@ int main(int argc, char *argv[]) {
         else if (key == "send")
             throughput *= xdbcEnv.network_parallelism;
 
-        spdlog::get("XDBC.SERVER")->info("Component: {0}, throughput {1} MB/s", key, throughput);
+        spdlog::get("XDBC.SERVER")->info("Component: {0}, throughput {1} MB/s", key, (int) throughput);
     }
 
     /* std::cout << "Timestamp\tReadBufferIdsSize\tDeserBufferIdsSize\tCompressedBufferIdsSize\tNetworkBufferIdsSize"

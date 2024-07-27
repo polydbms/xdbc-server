@@ -89,6 +89,11 @@ struct RuntimeEnv {
     int profilingBufferCnt;
     std::vector<std::tuple<long long, size_t, size_t, size_t, size_t>> queueSizes;
     std::atomic<bool> monitor;
+    std::multimap<std::string, long> readThroughput;
+    std::multimap<std::string, long> deserThroughput;
+    std::multimap<std::string, long> compThroughput;
+    std::multimap<std::string, long> sendThroughput;
+
 
 };
 

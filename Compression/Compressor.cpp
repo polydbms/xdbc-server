@@ -40,14 +40,18 @@ void Compressor::compress(int thr, const std::string &compName) {
 
 
 
+
             //TODO: replace function with a hashmap or similar
             //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib, 6 cols
             size_t compId = Compressor::getCompId(xdbcEnv->compression_algorithm);
 
             //spdlog::get("XDBC.SERVER")->warn("Send thread {0} entering compression", thr);
 
+
+            //+size_t for temp header
+            auto decompressedPtr = bp[bufferId].data() + sizeof(size_t);
             std::array<size_t, MAX_ATTRIBUTES> compressed_sizes = Compressor::compress_buffer(
-                    xdbcEnv->compression_algorithm, bp[bufferId].data(), bp[bufferId].data() + sizeof(Header),
+                    xdbcEnv->compression_algorithm, decompressedPtr, bp[bufferId].data() + sizeof(Header),
                     xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size,
                     xdbcEnv->tuples_per_buffer, xdbcEnv->schema);
 
@@ -79,6 +83,7 @@ void Compressor::compress(int thr, const std::string &compName) {
             //TODO: create more sophisticated header with checksum etc
 
             Header head;
+            std::memcpy(&head.totalTuples, bp[bufferId].data(), sizeof(size_t));
             head.compressionType = compId;
             head.totalSize = totalSize;
             head.intermediateFormat = static_cast<size_t>(xdbcEnv->iformat);

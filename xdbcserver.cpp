@@ -116,8 +116,8 @@ void XDBCServer::monitorQueues(int interval_ms) {
     long long curTimeInterval = interval_ms / 1000;
 
     while (xdbcEnv->monitor) {
-        auto now = std::chrono::high_resolution_clock::now();
-        auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
+        //auto now = std::chrono::high_resolution_clock::now();
+        //auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
         // Calculate the total size of all queues in each category
         size_t readBufferTotalSize = 0;
@@ -349,7 +349,7 @@ int XDBCServer::serve() {
                                           [](int acc, const SchemaAttribute &attr) {
                                               return acc + attr.size;
                                           });
-    xdbcEnv->tuples_per_buffer = xdbcEnv->buffer_size * 1024 / xdbcEnv->tuple_size;
+    xdbcEnv->tuples_per_buffer = (xdbcEnv->buffer_size * 1024 / xdbcEnv->tuple_size);
 
     bp.resize(xdbcEnv->buffers_in_bufferpool,
               std::vector<std::byte>(xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size + sizeof(Header)));
