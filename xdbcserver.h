@@ -19,6 +19,7 @@ struct Header {
 
     size_t compressionType;
     size_t totalSize;
+    size_t totalTuples;
     size_t intermediateFormat;
     size_t crc;
     size_t attributeSize[MAX_ATTRIBUTES];

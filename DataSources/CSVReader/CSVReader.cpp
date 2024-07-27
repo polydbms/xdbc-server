@@ -5,6 +5,8 @@
 #include "../../xdbcserver.h"
 #include <boost/iostreams/device/mapped_file.hpp>
 #include <queue>
+#include "../deserializers.h"
+
 
 void handle_error(const char *msg) {
     perror(msg);
@@ -174,6 +176,7 @@ int CSVReader::readCSV(int thr) {
 
         auto start_profiling = std::chrono::high_resolution_clock::now();
 
+
         while (currentLine < curPart.endOff && std::getline(file, line)) {
             line += "\n";
             tuplesRead++;
@@ -189,20 +192,23 @@ int CSVReader::readCSV(int thr) {
                 if (buffersRead > 0 && buffersRead % xdbcEnv->profilingBufferCnt == 0) {
                     auto duration_profiling = std::chrono::duration_cast<std::chrono::microseconds>(
                             std::chrono::high_resolution_clock::now() - start_profiling).count();
+
                     xdbcEnv->profilingInfo.insert({"read", duration_profiling});
+
                     start_profiling = std::chrono::high_resolution_clock::now();
+
+
                     /*spdlog::get("XDBC.SERVER")->info("Read thr {0} profiling {1} ms per {2} buffs", thr,
                                                      duration_profiling, xdbcEnv->profilingBufferCnt);*/
 
                 }
 
                 //spdlog::get("XDBC.SERVER")->info("CSV thread {0}: sent buff {1} to deserQ {2}", thr, curBid, deserQ);
-                deserQ++;
-                if (deserQ == xdbcEnv->deser_parallelism)
-                    deserQ = 0;
+                deserQ = (deserQ + 1) % xdbcEnv->deser_parallelism;
                 auto start_wait = std::chrono::high_resolution_clock::now();
 
                 curBid = xdbcEnv->readBufferPtr[thr]->pop();
+
                 //spdlog::get("XDBC.SERVER")->info("CSV thread {0}: got buff {1} ", thr, curBid);
 
 
@@ -223,6 +229,7 @@ int CSVReader::readCSV(int thr) {
         currentLine = 0;
 
         curPart = xdbcEnv->partPtr[thr]->pop();
+
 
     }
 
@@ -276,17 +283,40 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
     size_t readOffset = 0;
     const char *endPtr;
     size_t len;
-    int bufferTupleId = 0;
+    size_t bufferTupleId = 0;
     int bytesInTuple = 0;
-    int celli = -1;
-    double celld = -1;
-    char cellc = ' ';
+
     int compQ = 0;
     std::byte *startWritePtr;
     const char *startReadPtr;
     void *write;
-    int readMoreQ = 0;
+
     size_t schemaSize = xdbcEnv->schema.size();
+
+    std::vector<size_t> sizes(schemaSize);
+    std::vector<size_t> schemaChars(schemaSize);
+    using DeserializeFunc = void (*)(const char *src, const char *end, void *dest, int attSize, size_t len);
+    std::vector<DeserializeFunc> deserializers(schemaSize);
+
+    for (size_t i = 0; i < schemaSize; ++i) {
+        if (xdbcEnv->schema[i].tpe[0] == 'I') {
+            sizes[i] = 4; // sizeof(int)
+            schemaChars[i] = 'I';
+            deserializers[i] = deserialize<int>;
+        } else if (xdbcEnv->schema[i].tpe[0] == 'D') {
+            sizes[i] = 8; // sizeof(double)
+            schemaChars[i] = 'D';
+            deserializers[i] = deserialize<double>;
+        } else if (xdbcEnv->schema[i].tpe[0] == 'C') {
+            sizes[i] = 1; // sizeof(char)
+            schemaChars[i] = 'C';
+            deserializers[i] = deserialize<char>;
+        } else if (xdbcEnv->schema[i].tpe[0] == 'S') {
+            sizes[i] = xdbcEnv->schema[i].size;
+            schemaChars[i] = 'S';
+            deserializers[i] = deserialize<const char *>;
+        }
+    }
 
     auto start_profiling = std::chrono::high_resolution_clock::now();
     while (emptyCtr < xdbcEnv->read_parallelism || !tmpBuffers.empty()) {
@@ -347,7 +377,8 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
         while (readOffset < curReadBufferRef.size()) {
 
             startReadPtr = reinterpret_cast<const char *>(curReadBufferRef.data() + readOffset);
-            startWritePtr = bp[curWriteBuffer].data();
+            //+sizeof(size_t) for temp header (totalTuples)
+            startWritePtr = bp[curWriteBuffer].data() + sizeof(size_t);
 
             bytesInTuple = 0;
 
@@ -372,41 +403,18 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                     write = startWritePtr + bytesInTuple * xdbcEnv->tuples_per_buffer + bufferTupleId * attribute.size;
                 }
 
-                switch (attribute.tpe[0]) {
-                    case 'I': {
-                        std::from_chars(tmpPtr, tmpEnd, celli);
-                        memcpy(write, &celli, 4);
-                        break;
-                    }
-                    case 'D': {
-                        std::from_chars(tmpPtr, tmpEnd, celld);
-                        memcpy(write, &celld, 8);
-                        break;
-                    }
-                    case 'C': {
-                        memcpy(write, tmpPtr, 1);
-                        break;
-                    }
-                    case 'S': {
-                        memset(write, 0, attribute.size);
-                        memcpy(write, tmpPtr, len);
-                        //TODO: maybe \0 termination
-                        break;
-                    }
-                    default: {
-                        break;
-                    }
-                }
+                deserializers[attPos](tmpPtr, tmpEnd, write, attribute.size, len);
 
-                //TODO: add more types
                 bytesInTuple += attribute.size;
                 readOffset += len + 1;
 
             }
+
             bufferTupleId++;
             totalThreadWrittenTuples++;
 
             if (bufferTupleId == xdbcEnv->tuples_per_buffer) {
+                memcpy(bp[curWriteBuffer].data(), &bufferTupleId, sizeof(size_t));
                 bufferTupleId = 0;
 
                 totalThreadWrittenBuffers++;
@@ -419,7 +427,6 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                     /*spdlog::get("XDBC.SERVER")->info("Deser thr {0} profiling {1} ms per {2} buffs", thr,
                                                      duration_profiling, xdbcEnv->profilingBufferCnt);*/
                 }
-
 
                 xdbcEnv->compBufferPtr[compQ]->push(curWriteBuffer);
                 compQ = (compQ + 1) % xdbcEnv->compression_parallelism;
@@ -441,22 +448,9 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
         spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} has {1} remaining tuples",
                                          thr, xdbcEnv->tuples_per_buffer - bufferTupleId);
 
-        //TODO: remove dirty fix, potentially with buffer header or resizable buffers
-        int mone = -1;
+        //write tuple count to tmp header
+        memcpy(bp[curWriteBuffer].data(), &bufferTupleId, sizeof(size_t));
 
-        for (int i = bufferTupleId; i < xdbcEnv->tuples_per_buffer; i++) {
-
-            void *writePtr;
-            if (xdbcEnv->iformat == 1) {
-                writePtr = startWritePtr + bufferTupleId * xdbcEnv->tuple_size;
-            } else if (xdbcEnv->iformat == 2) {
-                writePtr = startWritePtr + bufferTupleId * xdbcEnv->schema[0].size;
-            }
-
-            memcpy(writePtr, &mone, 4);
-        }
-
-        //spdlog::get("XDBC.SERVER")->info("thr {0} finished remaining", thr);
         xdbcEnv->compBufferPtr[compQ]->push(curWriteBuffer);
         totalThreadWrittenBuffers++;
     }
