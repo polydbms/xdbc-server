@@ -47,8 +47,16 @@ struct SchemaAttribute {
     std::string tpe;
     int size;
 };
+struct ProfilingTimestamps {
+    std::chrono::high_resolution_clock::time_point timestamp;
+    int thread;
+    std::string component;
+    std::string event;
+};
 typedef std::shared_ptr<customQueue<int>> FBQ_ptr;
 typedef std::shared_ptr<customQueue<Part>> FPQ_ptr;
+typedef std::shared_ptr<customQueue<ProfilingTimestamps>> PTQ_ptr;
+
 
 struct RuntimeEnv {
     long transfer_id;
@@ -64,14 +72,6 @@ struct RuntimeEnv {
     int deser_parallelism;
     int network_parallelism;
     int compression_parallelism;
-    std::atomic<long long> read_wait_time;
-    std::atomic<long long> deser_wait_time;
-    std::atomic<long long> network_wait_time;
-    std::atomic<long long> compression_wait_time;
-    std::atomic<long long> read_time;
-    std::atomic<long long> deser_time;
-    std::atomic<long long> network_time;
-    std::atomic<long long> compression_time;
 
     std::vector<FBQ_ptr> moreBuffersQ;
     std::vector<FBQ_ptr> readBufferPtr;
@@ -85,15 +85,10 @@ struct RuntimeEnv {
     std::vector<SchemaAttribute> schema;
     std::string schemaJSON;
     std::vector<FBQ_ptr> sendThreadReady;
-    std::multimap<std::string, long> profilingInfo;
-    int profilingBufferCnt;
     std::vector<std::tuple<long long, size_t, size_t, size_t, size_t>> queueSizes;
     std::atomic<bool> monitor;
-    std::multimap<std::string, long> readThroughput;
-    std::multimap<std::string, long> deserThroughput;
-    std::multimap<std::string, long> compThroughput;
-    std::multimap<std::string, long> sendThroughput;
 
+    PTQ_ptr pts;
 
 };
 

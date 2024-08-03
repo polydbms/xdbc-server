@@ -18,28 +18,22 @@ Compressor::Compressor(RuntimeEnv &xdbcEnv) :
 
 void Compressor::compress(int thr, const std::string &compName) {
 
+    xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "start"});
+
     int emptyCtr = 0;
     int bufferId;
     int netQ = 0;
     long compressedBuffers = 0;
 
-    auto start_profiling = std::chrono::high_resolution_clock::now();
-
     while (emptyCtr < xdbcEnv->deser_parallelism) {
-        auto start_wait = std::chrono::high_resolution_clock::now();
+
 
         bufferId = xdbcEnv->compBufferPtr[thr]->pop();
-
-        auto duration_wait_microseconds = std::chrono::duration_cast<std::chrono::microseconds>(
-                std::chrono::high_resolution_clock::now() - start_wait).count();
-        xdbcEnv->compression_wait_time.fetch_add(duration_wait_microseconds, std::memory_order_relaxed);
+        xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "pop"});
 
         if (bufferId == -1)
             emptyCtr++;
         else {
-
-
-
 
             //TODO: replace function with a hashmap or similar
             //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib, 6 cols
@@ -47,9 +41,7 @@ void Compressor::compress(int thr, const std::string &compName) {
 
             //spdlog::get("XDBC.SERVER")->warn("Send thread {0} entering compression", thr);
 
-
-            //+size_t for temp header
-            auto decompressedPtr = bp[bufferId].data() + sizeof(size_t);
+            auto decompressedPtr = bp[bufferId].data() + sizeof(Header);
             std::array<size_t, MAX_ATTRIBUTES> compressed_sizes = Compressor::compress_buffer(
                     xdbcEnv->compression_algorithm, decompressedPtr, bp[bufferId].data() + sizeof(Header),
                     xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size,
@@ -82,8 +74,10 @@ void Compressor::compress(int thr, const std::string &compName) {
 
             //TODO: create more sophisticated header with checksum etc
 
-            Header head;
-            std::memcpy(&head.totalTuples, bp[bufferId].data(), sizeof(size_t));
+            auto head1 = reinterpret_cast<Header *>(bp[bufferId].data());
+            Header head{};
+            //std::memcpy(&head.totalTuples, bp[bufferId].data(), sizeof(size_t));
+            head.totalTuples = head1->totalTuples;
             head.compressionType = compId;
             head.totalSize = totalSize;
             head.intermediateFormat = static_cast<size_t>(xdbcEnv->iformat);
@@ -94,22 +88,14 @@ void Compressor::compress(int thr, const std::string &compName) {
             std::copy(compressed_sizes.begin(), compressed_sizes.end(), head.attributeSize);
             std::memcpy(bp[bufferId].data(), &head, sizeof(Header));
             xdbcEnv->sendBufferPtr[netQ]->push(bufferId);
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "push"});
 
             compressedBuffers++;
-            if (compressedBuffers > 0 && compressedBuffers % xdbcEnv->profilingBufferCnt == 0) {
-                auto duration_profiling = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::high_resolution_clock::now() - start_profiling).count();
-                xdbcEnv->profilingInfo.insert({"comp", duration_profiling});
-                start_profiling = std::chrono::high_resolution_clock::now();
-                /*spdlog::get("XDBC.SERVER")->info("Comp thr {0} profiling {1} ms per {2} buffs", thr,
-                                                 duration_profiling, xdbcEnv->profilingBufferCnt);*/
-            }
 
-            netQ++;
-            if (netQ == xdbcEnv->network_parallelism)
-                netQ = 0;
+            netQ = (netQ + 1) % xdbcEnv->network_parallelism;
         }
     }
+    xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "end"});
 
     for (int i = 0; i < xdbcEnv->network_parallelism; i++)
         xdbcEnv->sendBufferPtr[i]->push(-1);
@@ -289,23 +275,45 @@ Compressor::compress_buffer(const std::string &method, void *src, void *dst, siz
     for (size_t i = 0; i < MAX_ATTRIBUTES; i++)
         ret[i] = 0;
 
-    if (method == "zstd")
-        ret[0] = compress_zstd(src, dst, size);
-    else if (method == "snappy")
-        ret[0] = compress_snappy(src, dst, size);
-    else if (method == "lzo")
-        ret[0] = compress_lzo(src, dst, size);
-    else if (method == "lz4")
-        ret[0] = compress_lz4(src, dst, size);
-    else if (method == "zlib")
-        ret[0] = compress_zlib(src, dst, size);
-    else if (method == "cols") {
-        ret = compress_cols(src, dst, size, buff_size, schema);
-        //no method picked, not compressing
-    } else {
-        std::memcpy(dst, src, size);
-        ret[0] = size;
+    auto compMeth = getCompId(method);
+    switch (compMeth) {
+        case 0: {
+            //std::memcpy(dst, src, size);
+            ret[0] = size;
+            break;
+        }
+        case 1: {
+            ret[0] = compress_zstd(src, dst, size);
+            break;
+        }
+        case 2: {
+            ret[0] = compress_snappy(src, dst, size);
+            break;
+        }
+        case 3: {
+            ret[0] = compress_lzo(src, dst, size);
+            break;
+        }
+        case 4: {
+            ret[0] = compress_lz4(src, dst, size);
+            break;
+        }
+        case 5: {
+            ret[0] = compress_zlib(src, dst, size);
+            break;
+        }
+        case 6: {
+            ret = compress_cols(src, dst, size, buff_size, schema);
+            break;
+        }
+        default: {
+            std::memcpy(dst, src, size);
+            ret[0] = size;
+            break;
+        }
     }
+
+
     return ret;
 }
 

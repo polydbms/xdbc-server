@@ -1,16 +1,14 @@
 #include <absl/numeric/int128.h>
 #include <iostream>
-#include "pg.h"
-#include "ch.h"
 #include "xdbcserver.h"
 #include <chrono>
 #include <thread>
 #include <boost/program_options.hpp>
-#include <utility>
 #include <fstream>
 #include <iomanip>
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
+#include "metrics_calculator.h"
 
 using namespace std;
 namespace po = boost::program_options;
@@ -115,59 +113,13 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
         spdlog::get("XDBC.SERVER")->info("Transfer id: {0}", vm["transfer-id"].as<long>());
         env.transfer_id = vm["transfer-id"].as<long>();
     }
-    if (vm.count("profiling-breakpoint")) {
-        spdlog::get("XDBC.SERVER")->info("Profiling Breakpoint: {0}", vm["profiling-breakpoint"].as<int>());
-        env.profilingBufferCnt = vm["profiling-breakpoint"].as<int>();
-    }
 
-    //schema creation in DataSource constructor
-    //TODO: move schema creation to client and send serialized schema over network
-
-    env.read_time = 0;
-    env.deser_time = 0;
-    env.compression_time = 0;
-    env.network_time = 0;
-
-    env.read_wait_time = 0;
-    env.deser_wait_time = 0;
-    env.compression_wait_time = 0;
-    env.network_wait_time = 0;
     env.tuple_size = 0;
     env.tuples_per_buffer = 0;
 
 
 }
 
-void printAverageLoad(RuntimeEnv &_xdbcenv) {
-    long long totalTimestamps = 0;
-    size_t totalReadBufferIdsSize = 0;
-    size_t totalDeserBufferIdsSize = 0;
-    size_t totalCompressedBufferIdsSize = 0;
-    size_t totalNetworkBufferIdsSize = 0;
-    size_t recordCount = _xdbcenv.queueSizes.size();
-
-    for (const auto &record: _xdbcenv.queueSizes) {
-        totalTimestamps += std::get<0>(record);
-        totalReadBufferIdsSize += std::get<1>(record);
-        totalDeserBufferIdsSize += std::get<2>(record);
-        totalCompressedBufferIdsSize += std::get<3>(record);
-        totalNetworkBufferIdsSize += std::get<4>(record);
-    }
-
-    if (recordCount > 0) {
-        double avgReadBufferIdsSize = static_cast<double>(totalReadBufferIdsSize) / recordCount;
-        double avgDeserBufferIdsSize = static_cast<double>(totalDeserBufferIdsSize) / recordCount;
-        double avgCompressedBufferIdsSize = static_cast<double>(totalDeserBufferIdsSize) / recordCount;
-        double avgNetworkBufferIdsSize = static_cast<double>(totalNetworkBufferIdsSize) / recordCount;
-
-        spdlog::get("XDBC.SERVER")->info("Average Load of Queues: Reader, Deserializer, Compressor, Sender");
-        spdlog::get("XDBC.SERVER")->info("{0}\t{1}\t{2}\t{3}",
-                                         avgReadBufferIdsSize, avgDeserBufferIdsSize,
-                                         avgCompressedBufferIdsSize, avgNetworkBufferIdsSize);
-    } else {
-        spdlog::get("XDBC.SERVER")->info("No records available to calculate averages.");
-    }
-}
 
 int main(int argc, char *argv[]) {
 
@@ -176,182 +128,88 @@ int main(int argc, char *argv[]) {
     RuntimeEnv xdbcEnv;
     handleCMDParams(argc, argv, xdbcEnv);
 
-    int option = 5;
-
     auto start = std::chrono::steady_clock::now();
-    string op = "";
-    //TODO: Refactor legacy benchmarks to different module
-    switch (option) {
 
-        case 1:
-            op = "pg row";
-            pg_row();
-            break;
-        case 2:
-            op = "pg col";
-            pg_col();
-            break;
-        case 3:
-            op = "ch row";
-            ch_row();
-            break;
-        case 4:
-            op = "ch col";
-            ch_col();
-            break;
-        case 5: {
-            op = "xdbc server";
-            XDBCServer xdbcserver = XDBCServer(xdbcEnv);
-            xdbcserver.serve();
-            break;
-        }
-        case 6: {
-            op = "pg copy";
-            pg_copy();
-            break;
-        }
-        default:
-            cout << "No valid option" << endl;
-            break;
-    }
+    XDBCServer xdbcserver = XDBCServer(xdbcEnv);
+    xdbcserver.serve();
+
     auto end = std::chrono::steady_clock::now();
     auto total_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-    spdlog::get("XDBC.SERVER")->info("{0} | Total elapsed time: {1} ms", op, total_time);
-
-    long long read_wait_time = xdbcEnv.read_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.read_parallelism;
-    long long read_time = (xdbcEnv.read_time.load(std::memory_order_relaxed) / 1000 - read_wait_time);
-
-    long long deser_wait_time =
-            xdbcEnv.deser_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.deser_parallelism;
-    long long deser_time = (xdbcEnv.deser_time.load(std::memory_order_relaxed) / 1000 - deser_wait_time);
-
-    long long cmp_wait_time =
-            xdbcEnv.compression_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.compression_parallelism;
-    long long cmp_time = (xdbcEnv.compression_time.load(std::memory_order_relaxed) / 1000 - cmp_wait_time);
-
-    long long net_wait_time =
-            xdbcEnv.network_wait_time.load(std::memory_order_relaxed) / 1000 / xdbcEnv.network_parallelism;
-    long long net_time = (xdbcEnv.network_time.load(std::memory_order_relaxed) / 1000 - net_wait_time);
-
-    spdlog::get("XDBC.SERVER")->info(
-            "{0} | read time: {1} ms, deser time: {2} ms, compress time {3} ms, network time {4} ms",
-            op, read_time, deser_time, cmp_time, net_time);
-
-    spdlog::get("XDBC.SERVER")->info(
-            "{0} | read wait time: {1} ms, deser wait time: {2} ms, compress wait time {3} ms, network wait time {4} ms",
-            op, read_wait_time, deser_wait_time, cmp_wait_time, net_wait_time);
+    spdlog::get("XDBC.SERVER")->info("xdbc server | Total elapsed time: {0} ms", total_time);
 
 
-    //Compute profiling info
-    std::map<std::string, long long> totalDurations;
-    std::map<std::string, int> countEntries;
+    auto pts = std::vector<ProfilingTimestamps>(xdbcEnv.pts->size());
+    while (xdbcEnv.pts->size() != 0)
+        pts.push_back(xdbcEnv.pts->pop());
 
-    for (const auto &entry: xdbcEnv.profilingInfo) {
-        totalDurations[entry.first] += entry.second;
-        countEntries[entry.first]++;
-    }
+    auto component_metrics = calculate_metrics(pts, xdbcEnv.buffer_size);
+    std::ostringstream totalTimes;
+    std::ostringstream procTimes;
+    std::ostringstream waitingTimes;
+    std::ostringstream totalThroughput;
+    std::ostringstream perBufferThroughput;
 
-    // Compute and print throughput for each component
-    for (const auto &component: totalDurations) {
-        const std::string &key = component.first;
-        long long totalDuration = component.second;
-        int count = countEntries[key];
+    for (const auto &[component, metrics]: component_metrics) {
 
-        // Calculate total data size in bytes
-        double totalDataSizeBytes;
-        if (key.rfind("_buffer") == (key.length() - key.length())) {
-            totalDataSizeBytes =
-                    static_cast<double>(count) * (xdbcEnv.buffer_size * 1024);
-        } else {
-
-            totalDataSizeBytes =
-                    static_cast<double>(count) * xdbcEnv.profilingBufferCnt * (xdbcEnv.buffer_size * 1024);
+        if (!component.empty()) {
+            totalTimes << component << ":\t" << metrics.overall_time_ms << "ms, ";
+            procTimes << component << ":\t" << metrics.processing_time_ms << "ms, ";
+            waitingTimes << component << ":\t" << metrics.waiting_time_ms << "ms, ";
+            totalThroughput << component << ":\t" << metrics.total_throughput << "mb/s, ";
+            perBufferThroughput << component << ":\t" << metrics.per_buffer_throughput << "mb/s, ";
         }
 
-        // Convert total data size to MB
-        double totalDataSizeMB = totalDataSizeBytes / 1e6;
-
-        // Convert total duration to seconds
-        double totalDurationSeconds = totalDuration / 1e6;
-
-        // Calculate throughput in MB/s
-        double throughput = totalDataSizeMB / totalDurationSeconds;
-
-        if (key == "read")
-            throughput *= xdbcEnv.read_parallelism;
-        else if (key == "deser")
-            throughput *= xdbcEnv.deser_parallelism;
-        else if (key == "comp")
-            throughput *= xdbcEnv.compression_parallelism;
-        else if (key == "send")
-            throughput *= xdbcEnv.network_parallelism;
-
-        spdlog::get("XDBC.SERVER")->info("Component: {0}, throughput {1} MB/s", key, (int) throughput);
     }
 
-    /* std::cout << "Timestamp\tReadBufferIdsSize\tDeserBufferIdsSize\tCompressedBufferIdsSize\tNetworkBufferIdsSize"
-               << std::endl;
-     for (const auto &record: xdbcEnv.queueSizes) {
-         std::cout << std::get<0>(record) << "\t"
-                   << std::get<1>(record) << "\t"
-                   << std::get<2>(record) << "\t"
-                   << std::get<3>(record) << "\t"
-                   << std::get<4>(record) << std::endl;
-     }*/
-    printAverageLoad(xdbcEnv);
+    spdlog::get("XDBC.SERVER")->info(
+            "xdbc server | \n all:\t {} \n proc:\t{} \n wait:\t{} \n thr:\t {} \n thr/b:\t {}",
+            totalTimes.str(), procTimes.str(), waitingTimes.str(), totalThroughput.str(), perBufferThroughput.str());
 
+    auto loads = printAndReturnAverageLoad(xdbcEnv);
 
-    std::ofstream csv_file("/tmp/xdbc_server_timings.csv",
+    const std::string filename = "/tmp/xdbc_server_timings.csv";
+
+    std::ostringstream headerStream;
+    headerStream << "transfer_id,total_time,"
+                 << "read_wait_time,read_proc_time,read_throughput,read_throughput_pb,read_load,"
+                 << "deser_wait_time,deser_proc_time,deser_throughput,deser_throughput_pb,deser_load,"
+                 << "comp_wait_time,comp_proc_time,comp_throughput,comp_throughput_pb,comp_load,"
+                 << "send_wait_time,send_proc_time,send_throughput,send_throughput_pb,send_load\n";
+
+    std::ifstream file_check(filename);
+    bool is_empty = file_check.peek() == std::ifstream::traits_type::eof();
+    file_check.close();
+
+    std::ofstream csv_file(filename,
                            std::ios::out | std::ios::app);
+
+    if (is_empty)
+        csv_file << headerStream.str();
 
     csv_file << std::fixed << std::setprecision(2)
              << std::to_string(xdbcEnv.transfer_id) << "," << total_time << ","
-             << read_wait_time << ","
-             << read_time << ","
-             << deser_wait_time << ","
-             << deser_time << ","
-             << cmp_wait_time << ","
-             << cmp_time << ","
-             << net_wait_time << ","
-             << net_time << "\n";
+             << component_metrics["read"].waiting_time_ms << ","
+             << component_metrics["read"].processing_time_ms << ","
+             << component_metrics["read"].total_throughput << ","
+             << component_metrics["read"].per_buffer_throughput << ","
+             << std::get<0>(loads) << ","
+             << component_metrics["deser"].waiting_time_ms << ","
+             << component_metrics["deser"].processing_time_ms << ","
+             << component_metrics["deser"].total_throughput << ","
+             << component_metrics["deser"].per_buffer_throughput << ","
+             << std::get<1>(loads) << ","
+             << component_metrics["comp"].waiting_time_ms << ","
+             << component_metrics["comp"].processing_time_ms << ","
+             << component_metrics["comp"].total_throughput << ","
+             << component_metrics["comp"].per_buffer_throughput << ","
+             << std::get<2>(loads) << ","
+             << component_metrics["send"].waiting_time_ms << ","
+             << component_metrics["send"].processing_time_ms << ","
+             << component_metrics["send"].total_throughput << ","
+             << component_metrics["send"].per_buffer_throughput << ","
+             << std::get<3>(loads) << "\n";
     csv_file.close();
 
     return 0;
 }
-
-
-class Lineitem {
-public:
-    int l_orderkey;
-    int l_partkey;
-    int l_suppkey;
-    int l_linenumber;
-    double l_quantity;
-    double l_extendedprice;
-    double l_discount;
-    double l_tax;
-    string l_returnflag;
-    string l_linestatus;
-    string l_shipdate;
-    string l_commitdate;
-    string l_receiptdate;
-    string l_shipinstruct;
-    string l_shipmode;
-    string l_comment;
-
-    Lineitem() {}
-};
-
-class Supplier {
-public:
-    int s_suppkey;
-    string s_name;
-    string s_address;
-    int s_nationkey;
-    string s_phone;
-    float s_acctbal;
-    string s_comment;
-
-    Supplier() {}
-};
