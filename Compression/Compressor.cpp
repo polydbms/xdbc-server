@@ -131,6 +131,7 @@ size_t Compressor::compress_zstd(void *data, void *dst, size_t size) {
     size_t maxCompressedSize = ZSTD_compressBound(size);
 
     // Create a temporary buffer for the compressed data
+    //TODO: every thread should get its own temporary buffer of max buffer size to avoid reallocations
     std::vector<char> compressedBuffer(maxCompressedSize);
 
     // Compress the data
