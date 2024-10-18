@@ -60,6 +60,7 @@ ADD customQueue.h /xdbc-server/
 ADD main.cpp /xdbc-server/
 ADD xdbcserver.cpp /xdbc-server/
 ADD xdbcserver.h /xdbc-server/
+ADD metrics_calculator.h /xdbc-server/
 ADD Compression /xdbc-server/Compression
 ADD DataSources /xdbc-server/DataSources
 RUN ls /xdbc-server
