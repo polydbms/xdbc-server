@@ -318,7 +318,7 @@ Compressor::compress_buffer(const std::string &method, void *src, void *dst, siz
     return ret;
 }
 
-/* compress floating-point data */
+//compress floating-point data
 static size_t compress(FPZ *fpz, const void *data) {
     size_t size;
     /* write header */
@@ -326,7 +326,7 @@ static size_t compress(FPZ *fpz, const void *data) {
         fprintf(stderr, "cannot write header: %s\n", fpzip_errstr[fpzip_errno]);
         return 0;
     }
-    /* perform actual compression */
+    //perform actual compression
     size = fpzip_write(fpz, data);
     if (!size) {
         spdlog::get("XDBC.SERVER")->error("Compressor: fpzip failed, error: {0}", fpzip_errstr[fpzip_errno]);

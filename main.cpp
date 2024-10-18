@@ -2,7 +2,6 @@
 #include <iostream>
 #include "xdbcserver.h"
 #include <chrono>
-#include <thread>
 #include <boost/program_options.hpp>
 #include <fstream>
 #include <iomanip>
@@ -136,8 +135,7 @@ int main(int argc, char *argv[]) {
     auto end = std::chrono::steady_clock::now();
     auto total_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
-    spdlog::get("XDBC.SERVER")->info("xdbc server | Total elapsed time: {0} ms", total_time);
-
+    spdlog::get("XDBC.SERVER")->info("Total elapsed time: {} ms", total_time);
 
     auto pts = std::vector<ProfilingTimestamps>(xdbcEnv.pts->size());
     while (xdbcEnv.pts->size() != 0)

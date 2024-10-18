@@ -1,7 +1,7 @@
 # postgres server 14 on ubuntu 22.04 image
 FROM ubuntu:jammy
 
-ENV DEBIAN_FRONTEND noninteractive
+ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update
 RUN apt-get upgrade -qy
@@ -55,7 +55,11 @@ RUN cd /clickhouse-cpp && rm -rf build && mkdir build && cd build && cmake .. -D
 # copy and install xdbc server
 RUN mkdir /xdbc-server
 
-ADD * /xdbc-server/
+ADD CMakeLists.txt /xdbc-server/
+ADD customQueue.h /xdbc-server/
+ADD main.cpp /xdbc-server/
+ADD xdbcserver.cpp /xdbc-server/
+ADD xdbcserver.h /xdbc-server/
 ADD Compression /xdbc-server/Compression
 ADD DataSources /xdbc-server/DataSources
 RUN ls /xdbc-server

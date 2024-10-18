@@ -79,8 +79,6 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
         xdbcEnv.moreBuffersQ.push_back(mq);
     }
 
-
-
     //initialize deser queues
     for (int i = 0; i < xdbcEnv.deser_parallelism; i++) {
         FBQ_ptr q(new customQueue<int>);
