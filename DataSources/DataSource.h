@@ -104,8 +104,6 @@ public:
 
     virtual void readData() = 0;
 
-    std::string slStr(shortLineitem *t);
-
     double double_swap(double d);
 
     std::string formatSchema(const std::vector<SchemaAttribute> &schema);

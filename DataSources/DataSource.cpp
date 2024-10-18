@@ -39,18 +39,6 @@ DataSource::DataSource(RuntimeEnv &xdbcEnv, std::string tbl) :
 
 }
 
-std::string DataSource::slStr(shortLineitem *t) {
-
-    return std::to_string(t->l_orderkey) + std::string(", ") +
-           std::to_string(t->l_partkey) + std::string(", ") +
-           std::to_string(t->l_suppkey) + std::string(", ") +
-           std::to_string(t->l_linenumber) + std::string(", ") +
-           std::to_string(t->l_quantity) + std::string(", ") +
-           std::to_string(t->l_extendedprice) + std::string(", ") +
-           std::to_string(t->l_discount) + std::string(", ") +
-           std::to_string(t->l_tax);
-}
-
 double DataSource::double_swap(double d) {
     union {
         double d;
