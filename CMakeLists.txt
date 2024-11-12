@@ -12,6 +12,16 @@ SET(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -pg")]]
 set(ZSTD_LIBRARY_PATH "/usr/lib/x86_64-linux-gnu/libzstd.so")
 set(SNAPPY_LIBRARY_PATH "/usr/lib/x86_64-linux-gnu/libsnappy.so")
 
+
+set(LIBRARY_SOURCES
+    xdbcserver.cpp
+    Compression/Compressor.cpp
+    DataSources/PGReader/PGReader.cpp
+    DataSources/CHReader/CHReader.cpp
+    DataSources/CSVReader/CSVReader.cpp
+    DataSources/DataSource.cpp
+)
+
 include_directories("/zfp/include")
 link_directories(/zfp/lib)
 
@@ -46,6 +56,7 @@ ENDIF (Boost_FOUND)
 SET(USED_LIBS ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_PROGRAM_OPTIONS_LIBRARY} ${Boost_REGEX_LIBRARY} ${ZSTD_LIBRARY_PATH} ${SNAPPY_LIBRARY_PATH})
 
 #add_definitions(-DUSE_SYSTEM_ABSEIL=OFF)
+add_library(xdbcserver_lib SHARED ${LIBRARY_SOURCES})
 add_executable(${PROJECT_NAME} main.cpp xdbcserver.cpp Compression/Compressor.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/DataSource.cpp)
 #add_library(clickhouse-cpp SHARED IMPORTED)
 #set_property(TARGET clickhouse-cpp PROPERTY IMPORTED_LOCATION "/usr/local/lib/libclickhouse-cpp-lib.so")
