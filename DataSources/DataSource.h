@@ -73,12 +73,18 @@ struct RuntimeEnv {
     int network_parallelism;
     int compression_parallelism;
 
-    std::vector<FBQ_ptr> moreBuffersQ;
-    std::vector<FBQ_ptr> readBufferPtr;
-    std::vector<FBQ_ptr> deserBufferPtr;
-    std::vector<FBQ_ptr> compBufferPtr;
-    std::vector<FBQ_ptr> sendBufferPtr;
-    std::vector<FPQ_ptr> partPtr;
+    std::atomic<int> finishedReadThreads;
+    std::atomic<int> finishedDeserThreads;
+    std::atomic<int> finishedCompThreads;
+    std::atomic<int> finishedSendThreads;
+
+    FBQ_ptr deserExtraBufferPtr;
+    FBQ_ptr moreBuffersQ;
+    FBQ_ptr readBufferPtr;
+    FBQ_ptr deserBufferPtr;
+    FBQ_ptr compBufferPtr;
+    FBQ_ptr sendBufferPtr;
+    FPQ_ptr partPtr;
     std::vector<bool> activeReadThreads;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;

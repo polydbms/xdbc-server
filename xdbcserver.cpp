@@ -59,43 +59,35 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
     PTQ_ptr pq(new customQueue<ProfilingTimestamps>);
     xdbcEnv.pts = pq;
 
-    //initialize read queues
-    for (int i = 0; i < xdbcEnv.read_parallelism; i++) {
-        FBQ_ptr q(new customQueue<int>);
-        FPQ_ptr q2(new customQueue<Part>);
+    //initialize read queue
+    xdbcEnv.readBufferPtr = std::make_shared<customQueue<int>>();
+    xdbcEnv.finishedReadThreads.store(0);
 
+    //initially all buffers are free to read into
+    for (int i = 0; i < xdbcEnv.buffers_in_bufferpool; i++)
+        xdbcEnv.readBufferPtr->push(i);
 
-        //initially all buffers are free to write into
-        for (int j = i * (xdbcEnv.buffers_in_bufferpool / xdbcEnv.read_parallelism);
-             j < (i + 1) * (xdbcEnv.buffers_in_bufferpool / xdbcEnv.read_parallelism);
-             j++)
-            q->push(j);
+    //initialize more buffers queue
+    xdbcEnv.moreBuffersQ = std::make_shared<customQueue<int>>();
 
+    //initialize partitions queue
+    xdbcEnv.partPtr = std::make_shared<customQueue<Part>>();
 
-        xdbcEnv.readBufferPtr.push_back(q);
-        xdbcEnv.partPtr.push_back(q2);
-        //initialize more buffers queue
-        FBQ_ptr mq(new customQueue<int>);
-        xdbcEnv.moreBuffersQ.push_back(mq);
-    }
+    //initialize deser queue(s)
+    xdbcEnv.deserBufferPtr = std::make_shared<customQueue<int>>();
+    xdbcEnv.deserExtraBufferPtr = std::make_shared<customQueue<int>>();
+    xdbcEnv.finishedDeserThreads.store(0);
 
-    //initialize deser queues
-    for (int i = 0; i < xdbcEnv.deser_parallelism; i++) {
-        FBQ_ptr q(new customQueue<int>);
-        xdbcEnv.deserBufferPtr.push_back(q);
-    }
+    //initialize compression queue
+    xdbcEnv.compBufferPtr = std::make_shared<customQueue<int>>();
+    xdbcEnv.finishedCompThreads.store(0);
 
-    //initialize compression queues
-    for (int i = 0; i < xdbcEnv.compression_parallelism; i++) {
-        FBQ_ptr q(new customQueue<int>);
-        xdbcEnv.compBufferPtr.push_back(q);
-    }
+    //initialize send queue
+    xdbcEnv.sendBufferPtr = std::make_shared<customQueue<int>>();
+    xdbcEnv.finishedSendThreads.store(0);
 
-    //initialize send queues
+    //initialize send thread flags
     for (int i = 0; i < xdbcEnv.network_parallelism; i++) {
-        FBQ_ptr q(new customQueue<int>);
-        xdbcEnv.sendBufferPtr.push_back(q);
-        //initialize send thread flags
         FBQ_ptr q1(new customQueue<int>);
         xdbcEnv.sendThreadReady.push_back(q1);
     }
@@ -116,25 +108,12 @@ void XDBCServer::monitorQueues(int interval_ms) {
         //auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
         // Calculate the total size of all queues in each category
-        size_t readBufferTotalSize = 0;
-        for (auto &queue_ptr: xdbcEnv->readBufferPtr) {
-            readBufferTotalSize += queue_ptr->size();
-        }
+        size_t readBufferTotalSize = xdbcEnv->readBufferPtr->size();
 
-        size_t deserBufferTotalSize = 0;
-        for (auto &queue_ptr: xdbcEnv->deserBufferPtr) {
-            deserBufferTotalSize += queue_ptr->size();
-        }
+        size_t deserBufferTotalSize = xdbcEnv->readBufferPtr->size();
 
-        size_t compressedBufferTotalSize = 0;
-        for (auto &queue_ptr: xdbcEnv->compBufferPtr) {
-            compressedBufferTotalSize += queue_ptr->size();
-        }
-
-        size_t sendBufferTotalSize = 0;
-        for (auto &queue_ptr: xdbcEnv->sendBufferPtr) {
-            sendBufferTotalSize += queue_ptr->size();
-        }
+        size_t compressedBufferTotalSize = xdbcEnv->compBufferPtr->size();
+        size_t sendBufferTotalSize = xdbcEnv->sendBufferPtr->size();
 
         // Store the measurement as a tuple
         xdbcEnv->queueSizes.emplace_back(curTimeInterval, readBufferTotalSize, deserBufferTotalSize,
@@ -178,18 +157,18 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     int bufferId;
     size_t totalSentBytes = 0;
     int threadSentBuffers = 0;
+    int sendToDeser = false;
 
     boost::asio::const_buffer sendBuffer;
 
     bool boostError = false;
     int emptyCtr = 0;
-    int readQ = 0;
 
-    while (emptyCtr < xdbcEnv->compression_parallelism && !boostError) {
+    while (emptyCtr < 1 && !boostError) {
 
         auto start_wait = std::chrono::high_resolution_clock::now();
 
-        bufferId = xdbcEnv->sendBufferPtr[thr]->pop();
+        bufferId = xdbcEnv->sendBufferPtr->pop();
         xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "send", "pop"});
 
         if (bufferId == -1)
@@ -228,33 +207,22 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
 
                 //reset & release buffer for reader
                 //bp[bufferId].resize(xdbcEnv->buffer_size * xdbcEnv->tuple_size + sizeof(Header));
-                int checkedThreads = 0;
 
-                // Cycle through the read queues in a round-robin fashion
-                while (checkedThreads < xdbcEnv->read_parallelism) {
-                    // Check if the current thread pointed to by readQ is active
-                    if (xdbcEnv->activeReadThreads[readQ]) {
-                        // If the thread is active, send the buffer to this thread's queue
-                        xdbcEnv->readBufferPtr[readQ]->push(bufferId);
-                        xdbcEnv->pts->push(
-                                ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "send", "push"});
-                        //spdlog::get("XDBC.SERVER")->info("Send thread {0} sending buff {1} to readQ {2}",
-                        // thr, bufferId, readQ);
+                if (thr == 0 && xdbcEnv->moreBuffersQ->size() > 0) {
+                    int in = xdbcEnv->moreBuffersQ->pop();
+                    /*spdlog::get("XDBC.SERVER")->info("Send thread sending buff {} deser thread {}",
+                                                     bufferId, in);*/
+                    xdbcEnv->deserExtraBufferPtr->push(bufferId);
 
-                        // Move to the next queue
-                        readQ = (readQ + 1) % xdbcEnv->read_parallelism;
-                        break; // Exit after successfully sending the buffer
-                    } else {
-                        // If the thread is not active, just move to the next queue
-                        readQ = (readQ + 1) % xdbcEnv->read_parallelism;
-                        checkedThreads++; // Increment the number of checked threads
-                    }
+                } else {
+                    //spdlog::get("XDBC.SERVER")->info("Send thread sending buff {} to reader", bufferId);
+                    xdbcEnv->readBufferPtr->push(bufferId);
+
                 }
-                // Optionally handle the case where all threads are inactive
-                /*if (checkedThreads == xdbcEnv->read_parallelism) {
-                    spdlog::get("XDBC.SERVER")->info("All threads are inactive. Buffer {0} by thread {1} not sent",
-                                                     bufferId, thr);
-                }*/
+
+
+                xdbcEnv->pts->push(
+                        ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "send", "push"});
 
 
             } catch (const boost::system::system_error &e) {
