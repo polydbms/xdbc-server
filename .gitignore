@@ -3,3 +3,4 @@ plots/myvenv/*
 plots/*.pdf
 plots/*.csv
 cmake-build-*
+build/

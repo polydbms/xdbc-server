@@ -22,18 +22,17 @@ void Compressor::compress(int thr, const std::string &compName) {
 
     int emptyCtr = 0;
     int bufferId;
-    int netQ = 0;
     long compressedBuffers = 0;
 
-    while (emptyCtr < xdbcEnv->deser_parallelism) {
+    while (emptyCtr < 1) {
 
-
-        bufferId = xdbcEnv->compBufferPtr[thr]->pop();
+        bufferId = xdbcEnv->compBufferPtr->pop();
         xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "pop"});
 
-        if (bufferId == -1)
+        if (bufferId == -1) {
+            spdlog::get("XDBC.SERVER")->info("Comp thread {0} received poison pill", thr);
             emptyCtr++;
-        else {
+        } else {
 
             //TODO: replace function with a hashmap or similar
             //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib, 6 cols
@@ -87,19 +86,21 @@ void Compressor::compress(int thr, const std::string &compName) {
 
             std::copy(compressed_sizes.begin(), compressed_sizes.end(), head.attributeSize);
             std::memcpy(bp[bufferId].data(), &head, sizeof(Header));
-            xdbcEnv->sendBufferPtr[netQ]->push(bufferId);
+            xdbcEnv->sendBufferPtr->push(bufferId);
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "push"});
 
             compressedBuffers++;
 
-            netQ = (netQ + 1) % xdbcEnv->network_parallelism;
         }
     }
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "end"});
 
-    for (int i = 0; i < xdbcEnv->network_parallelism; i++)
-        xdbcEnv->sendBufferPtr[i]->push(-1);
-
+    //notify that we finished
+    xdbcEnv->finishedCompThreads.fetch_add(1);
+    if (xdbcEnv->finishedCompThreads == xdbcEnv->compression_parallelism) {
+        for (int i = 0; i < xdbcEnv->network_parallelism; i++)
+            xdbcEnv->sendBufferPtr->push(-1);
+    }
 
 }
 
