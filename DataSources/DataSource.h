@@ -78,13 +78,12 @@ struct RuntimeEnv {
     std::atomic<int> finishedCompThreads;
     std::atomic<int> finishedSendThreads;
 
-    FBQ_ptr deserExtraBufferPtr;
-    FBQ_ptr moreBuffersQ;
-    FBQ_ptr readBufferPtr;
+    FBQ_ptr freeBufferPtr;
     FBQ_ptr deserBufferPtr;
     FBQ_ptr compBufferPtr;
     FBQ_ptr sendBufferPtr;
     FPQ_ptr partPtr;
+
     std::vector<bool> activeReadThreads;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;

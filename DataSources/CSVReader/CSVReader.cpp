@@ -147,7 +147,7 @@ int CSVReader::readCSV(int thr) {
     }
     //spdlog::get("XDBC.SERVER")->info("CSV thread {0}: Entered to read file {1}", thr, fileName);
 
-    int curBid = xdbcEnv->readBufferPtr->pop();
+    int curBid = xdbcEnv->freeBufferPtr->pop();
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
 
     Part curPart = xdbcEnv->partPtr->pop();
@@ -182,7 +182,7 @@ int CSVReader::readCSV(int thr) {
                 xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "push"});
 
 
-                curBid = xdbcEnv->readBufferPtr->pop();
+                curBid = xdbcEnv->freeBufferPtr->pop();
                 xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
 
                 //spdlog::get("XDBC.SERVER")->info("CSV thread {0}: got buff {1} ", thr, curBid);
@@ -302,19 +302,10 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
 
 
         //spdlog::get("XDBC.SERVER")->info("tmpBuffers {0}, writeBuffers {1}", bbbb, cccc);
-        //signal to reader that we need one more buffer
         if (!tmpBuffers.empty() && writeBuffers.empty()) {
 
-            //spdlog::get("XDBC.SERVER")->info("Deser thr {0} requesting buff", thr);
-            //use read thread 0 to request buffers
-            //TODO: check if we need to refactor moreBuffersQ since only 1 thread is used for forwarding
-            xdbcEnv->moreBuffersQ->push(thr);
-            //xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
-
-
-            int curBid = xdbcEnv->deserExtraBufferPtr->pop();
+            int curBid = xdbcEnv->freeBufferPtr->pop();
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
-            //spdlog::get("XDBC.SERVER")->info("Deser thr {0} got buff {1}", thr, curBid);
 
             writeBuffers.push(curBid);
         }
