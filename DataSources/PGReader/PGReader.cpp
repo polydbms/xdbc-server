@@ -529,11 +529,11 @@ PGReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &totalThread
             //spdlog::get("XDBC.SERVER")->info("Deser thr {0} requesting buff from {1}", thr, readMoreQ);
             //use read thread 0 to request buffers
             //TODO: check if we need to refactor moreBuffersQ since only 1 thread is used for forwarding
-            xdbcEnv->moreBuffersQ->push(thr);
+
 
             auto start_wait = std::chrono::high_resolution_clock::now();
 
-            int curBid = xdbcEnv->deserBufferPtr->pop();
+            int curBid = xdbcEnv->freeBufferPtr->pop();
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
 
             //spdlog::get("XDBC.SERVER")->info("Deser thr {0} got buff {1}", thr, curBid);
@@ -624,8 +624,6 @@ PGReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &totalThread
     }
 
 
-    //notify that we will not request other buffers
-    xdbcEnv->moreBuffersQ->push(-1);
 
 
     /*else
@@ -647,7 +645,7 @@ int PGReader::readPG(int thr) {
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "start"});
 
-    int curBid = xdbcEnv->readBufferPtr->pop();
+    int curBid = xdbcEnv->freeBufferPtr->pop();
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
 
     Part curPart = xdbcEnv->partPtr->pop();
@@ -713,7 +711,7 @@ int PGReader::readPG(int thr) {
 
                 //spdlog::get("XDBC.SERVER")->info("CSV thread {0}: sent buff {1} to deserQ {2}", thr, curBid, deserQ);
 
-                curBid = xdbcEnv->readBufferPtr->pop();
+                curBid = xdbcEnv->freeBufferPtr->pop();
                 /*keep = !keep;
                 if (thr == 0 && keep)
                     spdlog::get("XDBC.SERVER")->info("CSV thread {0}: size {1}", thr,
@@ -787,22 +785,7 @@ int PGReader::readPG(int thr) {
 
     int deserFinishedCounter = 0;
 
-    //TODO: this can be refactored to forward all empty buffers unti deser is finished
-    while (thr == 0 && deserFinishedCounter < xdbcEnv->deser_parallelism) {
-        int requestThrId = xdbcEnv->moreBuffersQ->pop();
 
-        if (requestThrId == -1)
-            deserFinishedCounter += 1;
-        else {
-            //spdlog::get("XDBC.SERVER")->info("Read thr {0} waiting for free buff", thr);
-            curBid = xdbcEnv->readBufferPtr->pop();
-            //spdlog::get("XDBC.SERVER")->info("Read thr {0} sending buff {1} to deser thr {2}",
-            //thr, curBid, requestThrId);
-
-            xdbcEnv->deserBufferPtr->push(curBid);
-        }
-
-    }
     xdbcEnv->activeReadThreads[thr] = false;
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "end"});

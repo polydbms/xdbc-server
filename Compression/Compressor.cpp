@@ -21,28 +21,31 @@ void Compressor::compress(int thr, const std::string &compName) {
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "start"});
 
     int emptyCtr = 0;
-    int bufferId;
+    int inBufferId;
+    int outBufferId;
     long compressedBuffers = 0;
 
     while (emptyCtr < 1) {
 
-        bufferId = xdbcEnv->compBufferPtr->pop();
+        inBufferId = xdbcEnv->compBufferPtr->pop();
+
         xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "pop"});
 
-        if (bufferId == -1) {
+        if (inBufferId == -1) {
             spdlog::get("XDBC.SERVER")->info("Comp thread {0} received poison pill", thr);
             emptyCtr++;
         } else {
 
+            outBufferId = xdbcEnv->freeBufferPtr->pop();
             //TODO: replace function with a hashmap or similar
             //0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib, 6 cols
             size_t compId = Compressor::getCompId(xdbcEnv->compression_algorithm);
 
             //spdlog::get("XDBC.SERVER")->warn("Send thread {0} entering compression", thr);
 
-            auto decompressedPtr = bp[bufferId].data() + sizeof(Header);
+            auto decompressedPtr = bp[inBufferId].data() + sizeof(Header);
             std::array<size_t, MAX_ATTRIBUTES> compressed_sizes = Compressor::compress_buffer(
-                    xdbcEnv->compression_algorithm, decompressedPtr, bp[bufferId].data() + sizeof(Header),
+                    xdbcEnv->compression_algorithm, decompressedPtr, bp[outBufferId].data() + sizeof(Header),
                     xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size,
                     xdbcEnv->tuples_per_buffer, xdbcEnv->schema);
 
@@ -73,7 +76,7 @@ void Compressor::compress(int thr, const std::string &compName) {
 
             //TODO: create more sophisticated header with checksum etc
 
-            auto head1 = reinterpret_cast<Header *>(bp[bufferId].data());
+            auto head1 = reinterpret_cast<Header *>(bp[inBufferId].data());
             Header head{};
             //std::memcpy(&head.totalTuples, bp[bufferId].data(), sizeof(size_t));
             head.totalTuples = head1->totalTuples;
@@ -85,9 +88,21 @@ void Compressor::compress(int thr, const std::string &compName) {
             //head.attributeSize = compressed_sizes;
 
             std::copy(compressed_sizes.begin(), compressed_sizes.end(), head.attributeSize);
-            std::memcpy(bp[bufferId].data(), &head, sizeof(Header));
-            xdbcEnv->sendBufferPtr->push(bufferId);
+
+            if (compId == 0) {
+                //no compression, or comp unsuccessful
+                std::memcpy(bp[inBufferId].data(), &head, sizeof(Header));
+                //forward in buffer with new header
+                xdbcEnv->sendBufferPtr->push(inBufferId);
+                //release out buffer
+                xdbcEnv->freeBufferPtr->push(outBufferId);
+            } else {
+                std::memcpy(bp[outBufferId].data(), &head, sizeof(Header));
+                xdbcEnv->sendBufferPtr->push(outBufferId);
+                xdbcEnv->freeBufferPtr->push(inBufferId);
+            }
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "push"});
+
 
             compressedBuffers++;
 
@@ -123,141 +138,107 @@ size_t Compressor::getCompId(const std::string &name) {
 
     return 0;
 }
-//TODO: examine in-place compression to avoid copies
 //TODO: recycle compression resources like context, temp buffer etc
+//TODO: check that we dont exceed size by calculating the max compressed size funcs of the libs
 
 size_t Compressor::compress_zstd(void *data, void *dst, size_t size) {
+    size_t compressedSize = ZSTD_compress(dst, size, data, size, 1);
 
-    // Calculate the maximum compressed size
-    size_t maxCompressedSize = ZSTD_compressBound(size);
-
-    // Create a temporary buffer for the compressed data
-    //TODO: every thread should get its own temporary buffer of max buffer size to avoid reallocations
-    std::vector<char> compressedBuffer(maxCompressedSize);
-
-    // Compress the data
-    size_t compressedSize = ZSTD_compress(
-            compressedBuffer.data(), maxCompressedSize, data, size, /* compression level */ 1);
-
-    // Check if compression was successful
     if (ZSTD_isError(compressedSize)) {
-        // Compression error occurred
         spdlog::get("XDBC.SERVER")->warn("Zstd Compression error: {0}", std::string(ZSTD_getErrorName(compressedSize)));
-        //TODO: handle error
         return size;
     }
-
-    // Copy the compressed data back to the original buffer
-    std::memcpy(dst, compressedBuffer.data(), compressedSize);
-
-    compressedBuffer.clear();
-    compressedBuffer.shrink_to_fit();
 
     return compressedSize;
 }
 
 
 size_t Compressor::compress_snappy(void *data, void *dst, size_t size) {
-    // Calculate the maximum compressed size
-    size_t maxCompressedSize = snappy::MaxCompressedLength(size);
-
-    // Create a temporary buffer for the compressed data
-    std::vector<char> compressedBuffer(maxCompressedSize);
-
-    // Compress the data
+    //size_t maxCompressedSize = snappy::MaxCompressedLength(size);
     size_t compressedSize;
-    snappy::RawCompress(static_cast<const char *>(data), size, compressedBuffer.data(), &compressedSize);
+    snappy::RawCompress(static_cast<const char *>(data), size, static_cast<char *>(dst), &compressedSize);
 
-    // Check if compression was successful
-    if (compressedSize > maxCompressedSize) {
-        // Compression error occurred
-        spdlog::get("XDBC.SERVER")->warn("Snappy compression  compressed size exceeds maximum size: {0}",
-                                         compressedSize);
-
+    if (compressedSize >= size) {
+        spdlog::get("XDBC.SERVER")->info("Snappy compression not effective. Returning original size.");
         return size;
     }
-
-    // Copy the compressed data back to the original buffer
-    std::memcpy(dst, compressedBuffer.data(), compressedSize);
 
     return compressedSize;
 }
 
+
 size_t Compressor::compress_lzo(void *src, void *dst, size_t size) {
-    // Calculate the maximum compressed size
-    size_t maxCompressedSize = size + (size / 16) + 64 + 3;
+    //size_t maxCompressedSize = size + (size / 16) + 64 + 3;
 
-    // Create a temporary buffer for the compressed data
-    std::vector<unsigned char> compressedBuffer(maxCompressedSize);
-
-    // Compress the data
-    lzo_uint compressedSize;
+    //allocate the work memory required by LZO
     lzo_voidp wrkmem = (lzo_voidp) malloc(LZO1X_1_MEM_COMPRESS);
-    lzo1x_1_compress(static_cast<const unsigned char *>(src), size, compressedBuffer.data(), &compressedSize, wrkmem);
-
-    // Check if compression was successful
-    if (compressedSize > maxCompressedSize) {
-        // Compression error occurred
-        spdlog::get("XDBC.SERVER")->warn("lzo compression error: compressed size exceeds maximum size: {0}/{1}",
-                                         maxCompressedSize, compressedSize);
-
+    if (!wrkmem) {
+        spdlog::get("XDBC.SERVER")->warn("lzo compression error: failed to allocate work memory.");
         return size;
     }
 
-    // Copy the compressed data back to the original buffer
-    std::memcpy(dst, compressedBuffer.data(), compressedSize);
+    lzo_uint compressedSize;
+    int result = lzo1x_1_compress(static_cast<const unsigned char *>(src), size,
+                                  static_cast<unsigned char *>(dst), &compressedSize, wrkmem);
+
+    //free the work memory
+    free(wrkmem);
+
+    if (result != LZO_E_OK) {
+        spdlog::get("XDBC.SERVER")->warn("lzo compression error: result code {0}.", result);
+        return size;
+    }
+
+    if (compressedSize > size) {
+        spdlog::get("XDBC.SERVER")->warn("lzo compression error: compressed size exceeds maximum size: {0}/{1}",
+                                         size, compressedSize);
+        return size;
+    }
 
     return compressedSize;
 }
 
 size_t Compressor::compress_lz4(void *src, void *dst, size_t size) {
-    // Calculate the maximum compressed size
-    int maxCompressedSize = LZ4_compressBound(size);
+    //int maxCompressedSize = LZ4_compressBound(size);
+    int compressedSize = LZ4_compress_default(static_cast<const char *>(src), static_cast<char *>(dst), size,
+                                              size);
 
-    // Create a temporary buffer for the compressed data
-    std::vector<char> compressedBuffer(maxCompressedSize);
-
-    // Compress the data
-    int compressedSize = LZ4_compress_default(static_cast<const char *>(src), compressedBuffer.data(), size,
-                                              maxCompressedSize);
-
-    // Check if compression was successful
-    if (compressedSize < 0) {
-        // Compression error occurred
-        spdlog::get("XDBC.SERVER")->warn("lz4 compression error: {0} ", compressedSize);
-        //throw std::runtime_error("Compression error: failed to compress data");
+    if (compressedSize <= 0) {
+        spdlog::get("XDBC.SERVER")->warn("lz4 compression error: {0}", compressedSize);
         return size;
     }
 
-    // Copy the compressed data back to the original buffer
-    std::memcpy(dst, compressedBuffer.data(), compressedSize);
+    if (compressedSize >= static_cast<int>(size)) {
+        spdlog::get("XDBC.SERVER")->info("lz4 compression not effective. Returning original size.");
+        return size;
+    }
 
     return compressedSize;
 }
 
+
 size_t Compressor::compress_zlib(void *src, void *dst, size_t size) {
 
-    uLongf compressed_size = compressBound(size);
+    uLongf maxCompressedSize = compressBound(size);
 
-    std::vector<Bytef> compressed_data(compressed_size);
-
+    uLongf compressedSize = maxCompressedSize;
+    //maximum compression level
     int compression_level = 9;
 
-    int result = compress2(compressed_data.data(), &compressed_size,
+    int result = compress2(static_cast<Bytef *>(dst), &compressedSize,
                            static_cast<const Bytef *>(src), size, compression_level);
 
-    if (compressed_size > size)
-        return size;
-
-    if (result == Z_OK) {
-        compressed_data.resize(compressed_size);
-        std::memcpy(dst, compressed_data.data(), compressed_size);
-    } else {
-        spdlog::get("XDBC.SERVER")->warn("ZLIB: not OK, error {0} ", zError(result));
+    if (result != Z_OK) {
+        spdlog::get("XDBC.SERVER")->warn("ZLIB compression error: {0}", zError(result));
         return size;
     }
 
-    return compressed_size;
+    if (compressedSize >= size) {
+        spdlog::get("XDBC.SERVER")->info("ZLIB compression not effective, returning original size.");
+        return size;
+    }
+
+    return compressedSize;
 }
 
 

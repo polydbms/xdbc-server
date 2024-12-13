@@ -59,31 +59,35 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
     PTQ_ptr pq(new customQueue<ProfilingTimestamps>);
     xdbcEnv.pts = pq;
 
-    //initialize read queue
-    xdbcEnv.readBufferPtr = std::make_shared<customQueue<int>>();
+    //initialize read thread status
     xdbcEnv.finishedReadThreads.store(0);
 
-    //initially all buffers are free to read into
-    for (int i = 0; i < xdbcEnv.buffers_in_bufferpool; i++)
-        xdbcEnv.readBufferPtr->push(i);
+    //initialize free queue
+    xdbcEnv.freeBufferPtr = std::make_shared<customQueue<int>>();
 
-    //initialize more buffers queue
-    xdbcEnv.moreBuffersQ = std::make_shared<customQueue<int>>();
+    //initially all buffers are put in the free buffer queue
+    for (int i = 0; i < xdbcEnv.buffers_in_bufferpool; i++)
+        xdbcEnv.freeBufferPtr->push(i);
+
 
     //initialize partitions queue
     xdbcEnv.partPtr = std::make_shared<customQueue<Part>>();
 
+    //TODO: introduce checks for queue capacities, based on existing buffers
+
     //initialize deser queue(s)
     xdbcEnv.deserBufferPtr = std::make_shared<customQueue<int>>();
-    xdbcEnv.deserExtraBufferPtr = std::make_shared<customQueue<int>>();
+    xdbcEnv.deserBufferPtr->setCapacity(xdbcEnv.deser_parallelism * 2);
     xdbcEnv.finishedDeserThreads.store(0);
 
     //initialize compression queue
     xdbcEnv.compBufferPtr = std::make_shared<customQueue<int>>();
+    xdbcEnv.compBufferPtr->setCapacity(xdbcEnv.compression_parallelism * 2);
     xdbcEnv.finishedCompThreads.store(0);
 
     //initialize send queue
     xdbcEnv.sendBufferPtr = std::make_shared<customQueue<int>>();
+    xdbcEnv.sendBufferPtr->setCapacity(xdbcEnv.network_parallelism * 2);
     xdbcEnv.finishedSendThreads.store(0);
 
     //initialize send thread flags
@@ -108,9 +112,9 @@ void XDBCServer::monitorQueues(int interval_ms) {
         //auto timestamp = std::chrono::duration_cast<std::chrono::milliseconds>(now.time_since_epoch()).count();
 
         // Calculate the total size of all queues in each category
-        size_t readBufferTotalSize = xdbcEnv->readBufferPtr->size();
+        size_t readBufferTotalSize = xdbcEnv->freeBufferPtr->size();
 
-        size_t deserBufferTotalSize = xdbcEnv->readBufferPtr->size();
+        size_t deserBufferTotalSize = xdbcEnv->deserBufferPtr->size();
 
         size_t compressedBufferTotalSize = xdbcEnv->compBufferPtr->size();
         size_t sendBufferTotalSize = xdbcEnv->sendBufferPtr->size();
@@ -208,17 +212,8 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
                 //reset & release buffer for reader
                 //bp[bufferId].resize(xdbcEnv->buffer_size * xdbcEnv->tuple_size + sizeof(Header));
 
-                if (thr == 0 && xdbcEnv->moreBuffersQ->size() > 0) {
-                    int in = xdbcEnv->moreBuffersQ->pop();
-                    /*spdlog::get("XDBC.SERVER")->info("Send thread sending buff {} deser thread {}",
-                                                     bufferId, in);*/
-                    xdbcEnv->deserExtraBufferPtr->push(bufferId);
 
-                } else {
-                    //spdlog::get("XDBC.SERVER")->info("Send thread sending buff {} to reader", bufferId);
-                    xdbcEnv->readBufferPtr->push(bufferId);
-
-                }
+                xdbcEnv->freeBufferPtr->push(bufferId);
 
 
                 xdbcEnv->pts->push(
