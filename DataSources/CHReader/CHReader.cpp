@@ -40,7 +40,6 @@ void CHReader::readData() {
     int totalCnt = 0;
 
     spdlog::get("XDBC.SERVER")->info("Using CH cpp lib, parallelism: {0}", xdbcEnv->read_parallelism);
-    spdlog::get("XDBC.SERVER")->info("Using compression: {0}", xdbcEnv->compression_algorithm);
 
     int threadWrittenTuples[xdbcEnv->read_parallelism];
     int threadWrittenBuffers[xdbcEnv->read_parallelism];
@@ -104,8 +103,10 @@ void CHReader::readData() {
 
 int CHReader::getMaxRowNum(const string &tableName) {
 
+    spdlog::get("XDBC.SERVER")->info("CH getMaxRowNum");
     // TODO: check connection properly
     Client client(ClientOptions().SetHost("ch").SetPort(9000));
+
     client.Execute("DROP VIEW IF EXISTS tmp_view");
 
     // TODO: check order
@@ -136,7 +137,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
     Client client(ClientOptions().SetHost("ch").SetPort(9000));
 
-    int curBid = xdbcEnv->deserBufferPtr->pop();
+    int curBid = xdbcEnv->freeBufferPtr->pop();
     int bufferTupleId = 0;
 
     while (true) {
@@ -162,7 +163,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
             /*std::string qStr = "SELECT rowNumberInAllBlocks() as row_no,* FROM " + tableName +
                                " WHERE row_no >= " + to_string(from) +
                                " AND row_no < " + to_string(to) + " ORDER BY l_orderkey";*/
-            int schemaSize = xdbcEnv->schema.size();
+            size_t schemaSize = xdbcEnv->schema.size();
 
             client.Select(qStr,
                           [this, &curBid, &totalThreadWrittenBuffers, &bufferTupleId, &totalThreadWrittenTuples, &thr, &schemaSize](
@@ -187,7 +188,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
                                       if (attribute.tpe == "INT") {
                                           memcpy(writePtr, &block[ti]->As<ColumnInt32>()->At(i), 4);
-
+                                          bytesInTuple += attribute.size;
                                       } else if (attribute.tpe == "DOUBLE") {
 
                                           // TODO: fix decimal/double column
@@ -195,10 +196,10 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                                           auto val = (double) col->At(i) * 0.01;
 
                                           memcpy(writePtr, &val, 8);
-
+                                          bytesInTuple += attribute.size;
                                       }
                                       ti++;
-                                      bytesInTuple += attribute.size;
+
                                   }
 
                                   totalThreadWrittenTuples++;
@@ -212,7 +213,7 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
                                       totalThreadWrittenBuffers++;
                                       xdbcEnv->compBufferPtr->push(curBid);
 
-                                      curBid = xdbcEnv->deserBufferPtr->pop();
+                                      curBid = xdbcEnv->freeBufferPtr->pop();
 
                                   }
                               }
@@ -251,8 +252,11 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
 
     }
     //notify that we finished
-    xdbcEnv->compBufferPtr->push(-1);
-
+    xdbcEnv->finishedReadThreads.fetch_add(1);
+    if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism) {
+        for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
+            xdbcEnv->compBufferPtr->push(-1);
+    }
 
     return 1;
 }

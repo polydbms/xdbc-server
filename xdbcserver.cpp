@@ -75,20 +75,38 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
 
     //TODO: introduce checks for queue capacities, based on existing buffers
 
+    //calculate buffers per queue
+    int total_consumer_threads = xdbcEnv.deser_parallelism +
+                                 xdbcEnv.compression_parallelism + xdbcEnv.network_parallelism;
+
+    if (xdbcEnv.buffers_in_bufferpool < total_consumer_threads)
+        spdlog::get("XDBC.SERVER")->error("not enough buffers in bufferpool");
+
+    int queueCapacityPerComp = xdbcEnv.buffers_in_bufferpool / 3;
+    int deserQueueCapacity = queueCapacityPerComp + xdbcEnv.buffers_in_bufferpool % 3;
+
     //initialize deser queue(s)
     xdbcEnv.deserBufferPtr = std::make_shared<customQueue<int>>();
-    xdbcEnv.deserBufferPtr->setCapacity(xdbcEnv.deser_parallelism * 2);
+    xdbcEnv.deserBufferPtr->setCapacity(deserQueueCapacity);
     xdbcEnv.finishedDeserThreads.store(0);
 
     //initialize compression queue
     xdbcEnv.compBufferPtr = std::make_shared<customQueue<int>>();
-    xdbcEnv.compBufferPtr->setCapacity(xdbcEnv.compression_parallelism * 2);
+    xdbcEnv.compBufferPtr->setCapacity(queueCapacityPerComp);
     xdbcEnv.finishedCompThreads.store(0);
 
     //initialize send queue
     xdbcEnv.sendBufferPtr = std::make_shared<customQueue<int>>();
-    xdbcEnv.sendBufferPtr->setCapacity(xdbcEnv.network_parallelism * 2);
+    xdbcEnv.sendBufferPtr->setCapacity(queueCapacityPerComp);
     xdbcEnv.finishedSendThreads.store(0);
+
+    spdlog::get("XDBC.SERVER")->info("Initialized queues, "
+                                     "freeBuffersQ: {0}, "
+                                     "deserQ:{1}, "
+                                     "compQ: {2}, "
+                                     "sendQ: {2}",
+                                     xdbcEnv.buffers_in_bufferpool, deserQueueCapacity, queueCapacityPerComp);
+
 
     //initialize send thread flags
     for (int i = 0; i < xdbcEnv.network_parallelism; i++) {
