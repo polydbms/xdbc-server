@@ -10,7 +10,19 @@ RUN apt-get upgrade -qy
 
 # install dependencies
 
-RUN apt install -qy clang libboost-all-dev cmake build-essential git libspdlog-dev gdb nlohmann-json3-dev iproute2 netcat
+RUN apt install -qy ca-certificates lsb-release wget
+
+# install arrow/parquet dependencies
+
+RUN wget https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+
+RUN apt install -y -V ./apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
+
+RUN apt update && apt install -y --no-install-recommends \
+    libarrow-dev \
+    libparquet-dev
+
+RUN apt install -qy clang libboost-all-dev cmake build-essential git libspdlog-dev gdb nlohmann-json3-dev iproute2 netcat wget
 
 #RUN git clone https://github.com/gabime/spdlog.git && cd spdlog && mkdir build && cd build &&  cmake .. && make -j && make install
 

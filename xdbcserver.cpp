@@ -12,6 +12,7 @@
 #include "DataSources/PGReader/PGReader.h"
 #include "DataSources/CHReader/CHReader.h"
 #include "DataSources/CSVReader/CSVReader.h"
+#include "DataSources/PQReader/PQReader.h"
 #include "spdlog/spdlog.h"
 
 
@@ -307,6 +308,8 @@ int XDBCServer::serve() {
         ds = std::make_unique<CHReader>(*xdbcEnv, tableName);
     } else if (xdbcEnv->system == "csv") {
         ds = std::make_unique<CSVReader>(*xdbcEnv, tableName);
+    } else if (xdbcEnv->system == "parquet") {
+        ds = std::make_unique<PQReader>(*xdbcEnv, tableName);
     }
 
     xdbcEnv->tuple_size = std::accumulate(xdbcEnv->schema.begin(), xdbcEnv->schema.end(), 0,
