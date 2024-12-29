@@ -177,10 +177,10 @@ int CSVReader::readCSV(int thr) {
                 head.totalSize = sizeWritten;
                 std::memcpy(bp[curBid].data(), &head, sizeof(Header));
                 sizeWritten = 0;
-                xdbcEnv->deserBufferPtr->push(curBid);
 
                 xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "push"});
 
+                xdbcEnv->deserBufferPtr->push(curBid);
 
                 curBid = xdbcEnv->freeBufferPtr->pop();
                 xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
@@ -208,9 +208,11 @@ int CSVReader::readCSV(int thr) {
     head.totalSize = sizeWritten;
     //send the last buffer & notify the end
     std::memcpy(bp[curBid].data(), &head, sizeof(Header));
-    xdbcEnv->deserBufferPtr->push(curBid);
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "push"});
+
+    xdbcEnv->deserBufferPtr->push(curBid);
+
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "end"});
 
     xdbcEnv->finishedReadThreads.fetch_add(1);
@@ -328,9 +330,10 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
 
                 totalThreadWrittenBuffers++;
 
-                xdbcEnv->compBufferPtr->push(outBid);
                 xdbcEnv->pts->push(
                         ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+
+                xdbcEnv->compBufferPtr->push(outBid);
 
                 outBid = xdbcEnv->freeBufferPtr->pop();
 
@@ -339,8 +342,10 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
 
         //we are done with reading the incoming buffer contents, return it and get a new one
         xdbcEnv->freeBufferPtr->push(inBid);
+
         inBid = xdbcEnv->deserBufferPtr->pop();
         xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
+
         readOffset = 0;
         if (inBid == -1)
             break;
@@ -358,8 +363,9 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
         head.totalTuples = bufferTupleId;
         memcpy(bp[outBid].data(), &head, sizeof(Header));
 
-        xdbcEnv->compBufferPtr->push(outBid);
         xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+
+        xdbcEnv->compBufferPtr->push(outBid);
 
         totalThreadWrittenBuffers++;
     }

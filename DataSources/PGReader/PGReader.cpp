@@ -331,9 +331,10 @@ PGReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &totalThread
 
                 totalThreadWrittenBuffers++;
 
-                xdbcEnv->compBufferPtr->push(outBid);
                 xdbcEnv->pts->push(
                         ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+
+                xdbcEnv->compBufferPtr->push(outBid);
 
                 outBid = xdbcEnv->freeBufferPtr->pop();
 
@@ -361,8 +362,8 @@ PGReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &totalThread
         head.totalTuples = bufferTupleId;
         memcpy(bp[outBid].data(), &head, sizeof(Header));
 
-        xdbcEnv->compBufferPtr->push(outBid);
         xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+        xdbcEnv->compBufferPtr->push(outBid);
 
         totalThreadWrittenBuffers++;
     }
@@ -449,9 +450,10 @@ int PGReader::readPG(int thr) {
                 head.totalSize = sizeWritten;
                 std::memcpy(bp[curBid].data(), &head, sizeof(Header));
                 sizeWritten = 0;
-                xdbcEnv->deserBufferPtr->push(curBid);
 
                 xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "push"});
+                xdbcEnv->deserBufferPtr->push(curBid);
+
 
                 //spdlog::get("XDBC.SERVER")->info("PG deser thread {0}: sent buff {1} to deserQ {2}", thr, curBid, deserQ);
 
@@ -510,8 +512,10 @@ int PGReader::readPG(int thr) {
     head.totalSize = sizeWritten;
     //send the last buffer & notify the end
     std::memcpy(bp[curBid].data(), &head, sizeof(Header));
-    xdbcEnv->deserBufferPtr->push(curBid);
+
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "push"});
+
+    xdbcEnv->deserBufferPtr->push(curBid);
 
     xdbcEnv->finishedReadThreads.fetch_add(1);
     if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism) {
