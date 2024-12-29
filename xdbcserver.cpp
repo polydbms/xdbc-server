@@ -231,13 +231,10 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
                 //reset & release buffer for reader
                 //bp[bufferId].resize(xdbcEnv->buffer_size * xdbcEnv->tuple_size + sizeof(Header));
 
-
-                xdbcEnv->freeBufferPtr->push(bufferId);
-
-
                 xdbcEnv->pts->push(
                         ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "send", "push"});
 
+                xdbcEnv->freeBufferPtr->push(bufferId);
 
             } catch (const boost::system::system_error &e) {
                 spdlog::get("XDBC.SERVER")->error("Error writing to socket:  {0} ", e.what());

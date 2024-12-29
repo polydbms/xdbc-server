@@ -89,6 +89,8 @@ void Compressor::compress(int thr, const std::string &compName) {
 
             std::copy(compressed_sizes.begin(), compressed_sizes.end(), head.attributeSize);
 
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "push"});
+
             if (compId == 0) {
                 //no compression, or comp unsuccessful
                 std::memcpy(bp[inBufferId].data(), &head, sizeof(Header));
@@ -101,8 +103,6 @@ void Compressor::compress(int thr, const std::string &compName) {
                 xdbcEnv->sendBufferPtr->push(outBufferId);
                 xdbcEnv->freeBufferPtr->push(inBufferId);
             }
-            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "push"});
-
 
             compressedBuffers++;
 

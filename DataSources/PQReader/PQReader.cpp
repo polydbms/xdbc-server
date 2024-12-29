@@ -113,9 +113,9 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "start"});
 
     // Pop a buffer from deserBufferPtr
+    auto deserBuff = xdbcEnv->deserBufferPtr->pop();
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
 
-    auto deserBuff = xdbcEnv->deserBufferPtr->pop();
     auto writeBuff = xdbcEnv->freeBufferPtr->pop();
 
     auto writeBuffPtr = bp[writeBuff].data() + sizeof(Header);
@@ -216,10 +216,9 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
 
                 xdbcEnv->compBufferPtr->push(writeBuff);
 
+                writeBuff = xdbcEnv->freeBufferPtr->pop();
                 xdbcEnv->pts->push(
                         ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
-
-                writeBuff = xdbcEnv->freeBufferPtr->pop();
 
                 writeBuffPtr = bp[writeBuff].data() + sizeof(Header);
                 totalThreadWrittenBuffers++;
@@ -281,8 +280,9 @@ int PQReader::readPQ(int thr) {
             }
 
             // Fetch a free buffer
-            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
             auto writeBuff = xdbcEnv->freeBufferPtr->pop();
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
+
 
             auto writeBuffPtr = bp[writeBuff].data();
 
