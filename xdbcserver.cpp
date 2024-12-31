@@ -143,9 +143,9 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
 
 }
 
-void XDBCServer::monitorQueues(int interval_ms) {
+void XDBCServer::monitorQueues() {
 
-    long long curTimeInterval = interval_ms / 1000;
+    long long curTimeInterval = xdbcEnv->profilingInterval / 1000;
 
     while (xdbcEnv->monitor) {
         //auto now = std::chrono::high_resolution_clock::now();
@@ -163,8 +163,8 @@ void XDBCServer::monitorQueues(int interval_ms) {
         xdbcEnv->queueSizes.emplace_back(curTimeInterval, readBufferTotalSize, deserBufferTotalSize,
                                          compressedBufferTotalSize, sendBufferTotalSize);
 
-        std::this_thread::sleep_for(std::chrono::milliseconds(interval_ms));
-        curTimeInterval += interval_ms / 1000;
+        std::this_thread::sleep_for(std::chrono::milliseconds(xdbcEnv->profilingInterval));
+        curTimeInterval += xdbcEnv->profilingInterval / 1000;
     }
 }
 
@@ -344,7 +344,7 @@ int XDBCServer::serve() {
 
     xdbcEnv->monitor.store(true);
 
-    _monitorThread = std::thread(&XDBCServer::monitorQueues, this, 1000);
+    _monitorThread = std::thread(&XDBCServer::monitorQueues, this);
 
     t1 = std::thread([&ds]() {
         ds->readData();

@@ -42,7 +42,7 @@ private:
     std::string tableName;
     std::thread _monitorThread;
 
-    void monitorQueues(int interval_ms);
+    void monitorQueues();
 };
 
 
