@@ -41,8 +41,8 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
              "Set the compression parallelism grade.\nDefault: 1")
             ("transfer-id,tid", po::value<long>()->default_value(0),
              "Set the transfer id.\nDefault: 0")
-            ("profiling-breakpoint", po::value<int>()->default_value(100),
-             "Set profiling breakpoint.\nDefault: 100");
+            ("profiling-interval", po::value<int>()->default_value(1000),
+             "Set profiling interval.\nDefault: 1000");
 
     po::positional_options_description p;
     p.add("compression-type", 1);
@@ -111,6 +111,10 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
     if (vm.count("transfer-id")) {
         spdlog::get("XDBC.SERVER")->info("Transfer id: {0}", vm["transfer-id"].as<long>());
         env.transfer_id = vm["transfer-id"].as<long>();
+    }
+    if (vm.count("profiling-interval")) {
+        spdlog::get("XDBC.SERVER")->info("Profiling interval: {0}", vm["profiling-interval"].as<int>());
+        env.profilingInterval = vm["profiling-interval"].as<int>();
     }
 
     env.tuple_size = 0;

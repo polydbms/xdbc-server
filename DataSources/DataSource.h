@@ -92,6 +92,7 @@ struct RuntimeEnv {
     std::vector<FBQ_ptr> sendThreadReady;
     std::vector<std::tuple<long long, size_t, size_t, size_t, size_t>> queueSizes;
     std::atomic<bool> monitor;
+    int profilingInterval;
 
     PTQ_ptr pts;
 
