@@ -78,7 +78,6 @@ void Compressor::compress(int thr, const std::string &compName) {
             //TODO: create more sophisticated header with checksum etc
 
             Header head{};
-            //std::memcpy(&head.totalTuples, bp[bufferId].data(), sizeof(size_t));
             head.totalTuples = head1->totalTuples;
             head.compressionType = compId;
             head.totalSize = totalSize;
