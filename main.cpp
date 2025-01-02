@@ -42,7 +42,10 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
             ("transfer-id,tid", po::value<long>()->default_value(0),
              "Set the transfer id.\nDefault: 0")
             ("profiling-interval", po::value<int>()->default_value(1000),
-             "Set profiling interval.\nDefault: 1000");
+             "Set profiling interval.\nDefault: 1000")
+            ("skip-deserializer", po::value<bool>()->default_value(false),
+             "Skip deserialization (0/1).\nDefault: false");
+
 
     po::positional_options_description p;
     p.add("compression-type", 1);
@@ -116,10 +119,13 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
         spdlog::get("XDBC.SERVER")->info("Profiling interval: {0}", vm["profiling-interval"].as<int>());
         env.profilingInterval = vm["profiling-interval"].as<int>();
     }
+    if (vm.count("skip-deserializer")) {
+        spdlog::get("XDBC.SERVER")->info("Skip serializer: {0}", vm["skip-deserializer"].as<bool>());
+        env.skip_deserializer = vm["skip-deserializer"].as<bool>();
+    }
 
     env.tuple_size = 0;
     env.tuples_per_buffer = 0;
-
 
 }
 

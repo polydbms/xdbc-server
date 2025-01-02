@@ -72,6 +72,7 @@ struct RuntimeEnv {
     int deser_parallelism;
     int network_parallelism;
     int compression_parallelism;
+    bool skip_deserializer;
 
     std::atomic<int> finishedReadThreads;
     std::atomic<int> finishedDeserThreads;

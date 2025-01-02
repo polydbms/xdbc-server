@@ -189,19 +189,11 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     string readThreadId = read_(socket);
     readThreadId.erase(std::remove(readThreadId.begin(), readThreadId.end(), '\n'), readThreadId.cend());
 
-    //decide partitioning
-    /*int minBId = thr * (xdbcEnv->buffers_in_bufferpool / xdbcEnv->network_parallelism);
-    int maxBId = (thr + 1) * (xdbcEnv->buffers_in_bufferpool / xdbcEnv->network_parallelism);*/
-
-    //int minBId = 0;
-    //int maxBId = xdbcEnv.bufferpool_size;
-
     spdlog::get("XDBC.SERVER")->info("Send thread {0} paired with Client rcv thread {1}", thr, readThreadId);
 
     int bufferId;
     size_t totalSentBytes = 0;
     int threadSentBuffers = 0;
-    int sendToDeser = false;
 
     boost::asio::const_buffer sendBuffer;
 
@@ -219,38 +211,16 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
             emptyCtr++;
         else {
 
-            //spdlog::get("XDBC.SERVER")->warn("Send thread {0} exited compression with total size {1}/{2}", thr,
-            //                                             totalSize, xdbcEnv.buffer_size * xdbcEnv.tuple_size);
-
-
-/*            if (bufferId == 0)
-                spdlog::get("XDBC.SERVER")->info("Send thread {0}, buffer: {1}, buffSize: {2}, ratio: {3}",
-                                                 thr, bufferId, totalSize,
-                                                 static_cast<double>(totalSize) /
-                                                 (xdbcEnv.buffer_size * xdbcEnv.tuple_size));*/
-
-
-
-            //std::array<size_t, 4> header{compId, compressed_size, compute_crc(bp[bufferId].data(), compressed_size),
-            //                             static_cast<size_t>(xdbcEnv.iformat)};
-
-            //tmpHeaderBuff = boost::asio::buffer(header);
             Header *headerPtr = reinterpret_cast<Header *>(bp[bufferId].data());
             /*spdlog::get("XDBC.SERVER")->warn("buffer {0} compression: {1}, totalSize: {2}", bufferId,
                                              headerPtr->compressionType, headerPtr->totalSize);*/
             sendBuffer = boost::asio::buffer(bp[bufferId], headerPtr->totalSize + sizeof(Header));
 
             try {
-
                 totalSentBytes += boost::asio::write(socket, sendBuffer);
                 threadSentBuffers++;
 
-
                 totalSentBuffers.fetch_add(1);
-                //spdlog::get("XDBC.SERVER")->info("total sent: {0}", totalSentBuffers);
-
-                //reset & release buffer for reader
-                //bp[bufferId].resize(xdbcEnv->buffer_size * xdbcEnv->tuple_size + sizeof(Header));
 
                 xdbcEnv->pts->push(
                         ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "send", "push"});
