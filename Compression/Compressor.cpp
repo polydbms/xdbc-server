@@ -42,11 +42,12 @@ void Compressor::compress(int thr, const std::string &compName) {
             size_t compId = Compressor::getCompId(xdbcEnv->compression_algorithm);
 
             //spdlog::get("XDBC.SERVER")->warn("Send thread {0} entering compression", thr);
+            auto head1 = reinterpret_cast<Header *>(bp[inBufferId].data());
 
             auto decompressedPtr = bp[inBufferId].data() + sizeof(Header);
             std::array<size_t, MAX_ATTRIBUTES> compressed_sizes = Compressor::compress_buffer(
                     xdbcEnv->compression_algorithm, decompressedPtr, bp[outBufferId].data() + sizeof(Header),
-                    xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size,
+                    head1->totalSize,
                     xdbcEnv->tuples_per_buffer, xdbcEnv->schema);
 
             size_t totalSize = 0;
@@ -76,12 +77,12 @@ void Compressor::compress(int thr, const std::string &compName) {
 
             //TODO: create more sophisticated header with checksum etc
 
-            auto head1 = reinterpret_cast<Header *>(bp[inBufferId].data());
             Header head{};
             //std::memcpy(&head.totalTuples, bp[bufferId].data(), sizeof(size_t));
             head.totalTuples = head1->totalTuples;
             head.compressionType = compId;
             head.totalSize = totalSize;
+
             head.intermediateFormat = static_cast<size_t>(xdbcEnv->iformat);
             //head.crc = compute_crc(bp[bufferId].data(), totalSize);
             head.attributeComp;
@@ -261,7 +262,6 @@ Compressor::compress_buffer(const std::string &method, void *src, void *dst, siz
     auto compMeth = getCompId(method);
     switch (compMeth) {
         case 0: {
-            //std::memcpy(dst, src, size);
             ret[0] = size;
             break;
         }

@@ -158,6 +158,7 @@ int CSVReader::readCSV(int thr) {
     size_t sizeWritten = 0;
     size_t buffersRead = 0;
     size_t tuplesRead = 0;
+    size_t tuplesWritten = 0;
 
     while (curPart.id != -1) {
         //skip to our starting offset
@@ -175,8 +176,10 @@ int CSVReader::readCSV(int thr) {
                 // Buffer is full, send it and fetch a new buffer
                 Header head{};
                 head.totalSize = sizeWritten;
+                head.totalTuples = tuplesWritten;
                 std::memcpy(bp[curBid].data(), &head, sizeof(Header));
                 sizeWritten = 0;
+                tuplesWritten = 0;
 
                 xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "push"});
 
@@ -194,6 +197,7 @@ int CSVReader::readCSV(int thr) {
             std::memcpy(writePtr, line.c_str(), lineSize);
             writePtr += lineSize;
             sizeWritten += lineSize;
+            tuplesWritten++;
 
             ++currentLine;
         }
@@ -206,6 +210,7 @@ int CSVReader::readCSV(int thr) {
 
     Header head{};
     head.totalSize = sizeWritten;
+    head.totalTuples = tuplesWritten;
     //send the last buffer & notify the end
     std::memcpy(bp[curBid].data(), &head, sizeof(Header));
 
@@ -235,139 +240,158 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "start"});
 
-    int outBid;
 
-    size_t readOffset = 0;
-    const char *endPtr;
-    size_t len;
-    size_t bufferTupleId = 0;
-    int bytesInTuple = 0;
+    if (xdbcEnv->skip_deserializer) {
+        while (true) {
+            int inBid = xdbcEnv->deserBufferPtr->pop();
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
 
-    std::byte *startWritePtr;
-    const char *startReadPtr;
-    void *write;
+            if (inBid == -1)
+                break;
 
-    size_t schemaSize = xdbcEnv->schema.size();
-
-    std::vector<size_t> sizes(schemaSize);
-    std::vector<size_t> schemaChars(schemaSize);
-    using DeserializeFunc = void (*)(const char *src, const char *end, void *dest, int attSize, size_t len);
-    std::vector<DeserializeFunc> deserializers(schemaSize);
-
-    for (size_t i = 0; i < schemaSize; ++i) {
-        if (xdbcEnv->schema[i].tpe[0] == 'I') {
-            sizes[i] = 4; // sizeof(int)
-            schemaChars[i] = 'I';
-            deserializers[i] = deserialize<int>;
-        } else if (xdbcEnv->schema[i].tpe[0] == 'D') {
-            sizes[i] = 8; // sizeof(double)
-            schemaChars[i] = 'D';
-            deserializers[i] = deserialize<double>;
-        } else if (xdbcEnv->schema[i].tpe[0] == 'C') {
-            sizes[i] = 1; // sizeof(char)
-            schemaChars[i] = 'C';
-            deserializers[i] = deserialize<char>;
-        } else if (xdbcEnv->schema[i].tpe[0] == 'S') {
-            sizes[i] = xdbcEnv->schema[i].size;
-            schemaChars[i] = 'S';
-            deserializers[i] = deserialize<const char *>;
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+            xdbcEnv->compBufferPtr->push(inBid);
+            totalThreadWrittenBuffers++;
         }
-    }
+    } else {
 
-    outBid = xdbcEnv->freeBufferPtr->pop();
-    int inBid = xdbcEnv->deserBufferPtr->pop();
-    xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
-    while (true) {
+        int outBid;
 
-        const std::vector<std::byte> &curReadBufferRef = bp[inBid];
-        const Header *header = reinterpret_cast<const Header *>(curReadBufferRef.data());
-        const std::byte *dataAfterHeader = curReadBufferRef.data() + sizeof(Header);
+        size_t readOffset = 0;
+        const char *endPtr;
+        size_t len;
+        size_t bufferTupleId = 0;
+        int bytesInTuple = 0;
 
-        while (readOffset < header->totalSize) {
+        std::byte *startWritePtr;
+        const char *startReadPtr;
+        void *write;
 
-            startReadPtr = reinterpret_cast<const char *>(dataAfterHeader + readOffset);
-            //+sizeof(Header) for temp header (totalTuples)
-            startWritePtr = bp[outBid].data() + sizeof(Header);
+        size_t schemaSize = xdbcEnv->schema.size();
 
-            bytesInTuple = 0;
+        std::vector<size_t> sizes(schemaSize);
+        std::vector<size_t> schemaChars(schemaSize);
+        using DeserializeFunc = void (*)(const char *src, const char *end, void *dest, int attSize, size_t len);
+        std::vector<DeserializeFunc> deserializers(schemaSize);
 
-            for (int attPos = 0; attPos < schemaSize; attPos++) {
+        for (size_t i = 0; i < schemaSize; ++i) {
+            if (xdbcEnv->schema[i].tpe[0] == 'I') {
+                sizes[i] = 4; // sizeof(int)
+                schemaChars[i] = 'I';
+                deserializers[i] = deserialize<int>;
+            } else if (xdbcEnv->schema[i].tpe[0] == 'D') {
+                sizes[i] = 8; // sizeof(double)
+                schemaChars[i] = 'D';
+                deserializers[i] = deserialize<double>;
+            } else if (xdbcEnv->schema[i].tpe[0] == 'C') {
+                sizes[i] = 1; // sizeof(char)
+                schemaChars[i] = 'C';
+                deserializers[i] = deserialize<char>;
+            } else if (xdbcEnv->schema[i].tpe[0] == 'S') {
+                sizes[i] = xdbcEnv->schema[i].size;
+                schemaChars[i] = 'S';
+                deserializers[i] = deserialize<const char *>;
+            }
+        }
 
-                //spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} processing schema", thr);
+        outBid = xdbcEnv->freeBufferPtr->pop();
+        int inBid = xdbcEnv->deserBufferPtr->pop();
+        xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
+        while (true) {
 
-                auto &attribute = xdbcEnv->schema[attPos];
+            const std::vector<std::byte> &curReadBufferRef = bp[inBid];
+            const Header *header = reinterpret_cast<const Header *>(curReadBufferRef.data());
+            const std::byte *dataAfterHeader = curReadBufferRef.data() + sizeof(Header);
 
-                endPtr = (attPos < schemaSize - 1) ? strchr(startReadPtr, ',') : strchr(startReadPtr, '\n');
+            while (readOffset < header->totalSize) {
 
-                len = endPtr - startReadPtr;
+                startReadPtr = reinterpret_cast<const char *>(dataAfterHeader + readOffset);
+                //+sizeof(Header) for temp header (totalTuples)
+                startWritePtr = bp[outBid].data() + sizeof(Header);
 
-                std::string_view tmp(startReadPtr, len);
-                const char *tmpPtr = tmp.data();
-                const char *tmpEnd = tmpPtr + len;
-                startReadPtr = endPtr + 1;
+                bytesInTuple = 0;
 
-                if (xdbcEnv->iformat == 1) {
-                    write = startWritePtr + bufferTupleId * xdbcEnv->tuple_size + bytesInTuple;
-                } else if (xdbcEnv->iformat == 2) {
-                    write = startWritePtr + bytesInTuple * xdbcEnv->tuples_per_buffer + bufferTupleId * attribute.size;
+                for (int attPos = 0; attPos < schemaSize; attPos++) {
+
+                    //spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} processing schema", thr);
+
+                    auto &attribute = xdbcEnv->schema[attPos];
+
+                    endPtr = (attPos < schemaSize - 1) ? strchr(startReadPtr, ',') : strchr(startReadPtr, '\n');
+
+                    len = endPtr - startReadPtr;
+
+                    std::string_view tmp(startReadPtr, len);
+                    const char *tmpPtr = tmp.data();
+                    const char *tmpEnd = tmpPtr + len;
+                    startReadPtr = endPtr + 1;
+
+                    if (xdbcEnv->iformat == 1) {
+                        write = startWritePtr + bufferTupleId * xdbcEnv->tuple_size + bytesInTuple;
+                    } else if (xdbcEnv->iformat == 2) {
+                        write = startWritePtr + bytesInTuple * xdbcEnv->tuples_per_buffer +
+                                bufferTupleId * attribute.size;
+                    }
+
+                    deserializers[attPos](tmpPtr, tmpEnd, write, attribute.size, len);
+
+                    bytesInTuple += attribute.size;
+                    readOffset += len + 1;
+
                 }
 
-                deserializers[attPos](tmpPtr, tmpEnd, write, attribute.size, len);
+                bufferTupleId++;
+                totalThreadWrittenTuples++;
 
-                bytesInTuple += attribute.size;
-                readOffset += len + 1;
+                if (bufferTupleId == xdbcEnv->tuples_per_buffer) {
+                    Header head{};
+                    head.totalTuples = bufferTupleId;
+                    head.totalSize = head.totalTuples * xdbcEnv->tuple_size;
+                    memcpy(bp[outBid].data(), &head, sizeof(Header));
+                    bufferTupleId = 0;
 
+                    totalThreadWrittenBuffers++;
+
+                    xdbcEnv->pts->push(
+                            ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+
+                    xdbcEnv->compBufferPtr->push(outBid);
+
+                    outBid = xdbcEnv->freeBufferPtr->pop();
+
+                }
             }
 
-            bufferTupleId++;
-            totalThreadWrittenTuples++;
+            //we are done with reading the incoming buffer contents, return it and get a new one
+            xdbcEnv->freeBufferPtr->push(inBid);
 
-            if (bufferTupleId == xdbcEnv->tuples_per_buffer) {
-                Header head{};
-                head.totalTuples = bufferTupleId;
-                memcpy(bp[outBid].data(), &head, sizeof(Header));
-                bufferTupleId = 0;
+            inBid = xdbcEnv->deserBufferPtr->pop();
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
 
-                totalThreadWrittenBuffers++;
+            readOffset = 0;
+            if (inBid == -1)
+                break;
 
-                xdbcEnv->pts->push(
-                        ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
-
-                xdbcEnv->compBufferPtr->push(outBid);
-
-                outBid = xdbcEnv->freeBufferPtr->pop();
-
-            }
         }
 
-        //we are done with reading the incoming buffer contents, return it and get a new one
-        xdbcEnv->freeBufferPtr->push(inBid);
 
-        inBid = xdbcEnv->deserBufferPtr->pop();
-        xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
+        //remaining tuples
+        if (bufferTupleId > 0 && bufferTupleId != xdbcEnv->tuples_per_buffer) {
+            spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} has {1} remaining tuples",
+                                             thr, xdbcEnv->tuples_per_buffer - bufferTupleId);
 
-        readOffset = 0;
-        if (inBid == -1)
-            break;
+            //write tuple count to tmp header
+            Header head{};
+            head.totalTuples = bufferTupleId;
+            head.totalSize = head.totalTuples * xdbcEnv->tuple_size;
+            memcpy(bp[outBid].data(), &head, sizeof(Header));
 
-    }
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
 
+            xdbcEnv->compBufferPtr->push(outBid);
 
-    //remaining tuples
-    if (bufferTupleId > 0 && bufferTupleId != xdbcEnv->tuples_per_buffer) {
-        spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} has {1} remaining tuples",
-                                         thr, xdbcEnv->tuples_per_buffer - bufferTupleId);
-
-        //write tuple count to tmp header
-        Header head{};
-        head.totalTuples = bufferTupleId;
-        memcpy(bp[outBid].data(), &head, sizeof(Header));
-
-        xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
-
-        xdbcEnv->compBufferPtr->push(outBid);
-
-        totalThreadWrittenBuffers++;
+            totalThreadWrittenBuffers++;
+        }
     }
 
 
