@@ -306,7 +306,6 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
             while (readOffset < header->totalSize) {
 
                 startReadPtr = reinterpret_cast<const char *>(dataAfterHeader + readOffset);
-                //+sizeof(Header) for temp header (totalTuples)
                 startWritePtr = bp[outBid].data() + sizeof(Header);
 
                 bytesInTuple = 0;
