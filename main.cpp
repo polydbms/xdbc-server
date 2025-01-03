@@ -179,7 +179,6 @@ void env_convert(RuntimeEnv& env, const nlohmann::json& env_json) {
             // Lock the mutex to ensure exclusive access to env_
             std::lock_guard<std::mutex> lock(env.env_mutex);
 
-            // //Safely copy env_.write_parallelism to env->write_parallelism
             env.transfer_id = env_.transfer_id;
             env.system = env_.system;
             env.compression_algorithm = env_.compression_algorithm;
@@ -207,24 +206,24 @@ int main(int argc, char *argv[]) {
     RuntimeEnv xdbcEnv;
     handleCMDParams(argc, argv, xdbcEnv);
 
-    // Setup websocket interface for controller
-    // xdbcEnv.stop_updation = 0;
-    // const std::string host = "xdbc-controller"; // controller IP 172.17.0.1
-    // const std::string port = "8003";      // controller port
-    // WebSocketClient ws_client(host, port);
-    // ws_client.start();// Start the WebSocket client communication
-    // // Run io_context in a separate thread to allow other tasks in the main thread
-    // std::thread io_thread([&]() {
-    //     // Now passing functions to 'run' which starts the communication
-    //     ws_client.run(
-    //         std::bind(&metrics_convert, std::ref(xdbcEnv)),  // Metrics conversion function
-    //         std::bind(&env_convert, std::ref(xdbcEnv), std::placeholders::_1)  // Environment conversion function
-    //     );
-    // });
-    // while (!ws_client.is_active()) { // Wait until the client is active
-    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Brief delay before checking again
-    // }
-    //xdbcEnv.stop_updation = 1;
+    //Setup websocket interface for controller
+    xdbcEnv.stop_updation = 0;
+    const std::string host = "xdbc-controller"; // controller IP 172.17.0.1
+    const std::string port = "8003";      // controller port
+    WebSocketClient ws_client(host, port);
+    ws_client.start();// Start the WebSocket client communication
+    // Run io_context in a separate thread to allow other tasks in the main thread
+    std::thread io_thread([&]() {
+        // Now passing functions to 'run' which starts the communication
+        ws_client.run(
+            std::bind(&metrics_convert, std::ref(xdbcEnv)),  // Metrics conversion function
+            std::bind(&env_convert, std::ref(xdbcEnv), std::placeholders::_1)  // Environment conversion function
+        );
+    });
+    while (!ws_client.is_active()) { // Wait until the client is active
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Brief delay before checking again
+    }
+    xdbcEnv.stop_updation = 1;
 
     auto start = std::chrono::steady_clock::now();
 
