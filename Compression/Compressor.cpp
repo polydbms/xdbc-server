@@ -63,7 +63,8 @@ void Compressor::compress(int thr, const std::string &compName) {
             }
 
             if (totalSize > xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size) {
-                spdlog::get("XDBC.SERVER")->warn("Compress thread {0} compression more than buffer", thr);
+                spdlog::get("XDBC.SERVER")->warn("Compress thread {} compression more than buffer {}/{}", thr,
+                                                 totalSize, xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size);
                 compId = 0;
             }
             if (totalSize == xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size) {

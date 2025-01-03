@@ -5,7 +5,7 @@
 #include "parquet/stream_reader.h"
 #include <parquet/metadata.h>
 #include "../../xdbcserver.h"
-#include "../deserializers_parquet.h"
+#include "deserializers_parquet.h"
 #include <fstream>
 #include <filesystem>
 
@@ -112,137 +112,156 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "start"});
 
-    // Pop a buffer from deserBufferPtr
-    auto deserBuff = xdbcEnv->deserBufferPtr->pop();
-    xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
+    if (xdbcEnv->skip_deserializer) {
+        while (true) {
+            int inBid = xdbcEnv->deserBufferPtr->pop();
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
 
-    auto writeBuff = xdbcEnv->freeBufferPtr->pop();
+            if (inBid == -1)
+                break;
 
-    auto writeBuffPtr = bp[writeBuff].data() + sizeof(Header);
-
-    size_t schemaSize = xdbcEnv->schema.size();
-    int numRows = 0;
-    size_t parquetFileSize;
-
-    // Precompute column offsets, sizes, and deserializers
-    std::vector<size_t> columnOffsets(schemaSize);
-    std::vector<size_t> columnSizes(schemaSize);
-    std::vector<std::function<void(parquet::StreamReader & , void * , int)>> deserializers(schemaSize);
-
-    size_t rowSize = 0;
-    for (size_t i = 0; i < schemaSize; ++i) {
-        const auto &attr = xdbcEnv->schema[i];
-        columnOffsets[i] = rowSize;
-        if (attr.tpe[0] == 'I') {
-            columnSizes[i] = 4;  // sizeof(int)
-            deserializers[i] = deserialize<int>;
-        } else if (attr.tpe[0] == 'D') {
-            columnSizes[i] = 8;
-            deserializers[i] = deserialize<double>;
-        } else if (attr.tpe[0] == 'C') {
-            columnSizes[i] = 1;  // sizeof(char)
-            deserializers[i] = deserialize<char>;
-        } else if (attr.tpe[0] == 'S') {
-            columnSizes[i] = attr.size;
-            deserializers[i] = deserialize<std::string>;
-        } else {
-            throw std::runtime_error("Unsupported column type: " + attr.tpe);
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+            xdbcEnv->compBufferPtr->push(inBid);
+            totalThreadWrittenBuffers++;
         }
-        rowSize += columnSizes[i];
-    }
+    } else {
+        // Pop a buffer from deserBufferPtr
+        auto deserBuff = xdbcEnv->deserBufferPtr->pop();
+        xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
 
-    // Preallocate fixed-size buffers for string attributes
-    std::vector<std::string> stringBuffers(schemaSize);
-    for (int colIdx = 0; colIdx < schemaSize; ++colIdx) {
-        const auto &attr = xdbcEnv->schema[colIdx];
-        if (attr.tpe[0] == 'S') { // STRING or CHAR
-            stringBuffers[colIdx].resize(attr.size, '\0'); // Fixed size with null padding
-        }
-    }
+        auto writeBuff = xdbcEnv->freeBufferPtr->pop();
 
-    while (true) {
-        // Get buffer data from deserBuff
-        const auto *bufferPtr = bp[deserBuff].data() + sizeof(size_t);
+        auto writeBuffPtr = bp[writeBuff].data() + sizeof(Header);
 
-        // Reinterpret the start of the buffer as the Header
-        std::memcpy(&parquetFileSize, bp[deserBuff].data(), sizeof(size_t));
+        size_t schemaSize = xdbcEnv->schema.size();
+        int numRows = 0;
+        size_t parquetFileSize;
 
-        // Wrap the buffer with an Arrow BufferReader
-        auto arrow_buffer = std::make_shared<arrow::Buffer>(reinterpret_cast<const uint8_t *>(bufferPtr),
-                                                            parquetFileSize);
-        auto buffer_reader = std::make_shared<arrow::io::BufferReader>(arrow_buffer);
+        // Precompute column offsets, sizes, and deserializers
+        std::vector<size_t> columnOffsets(schemaSize);
+        std::vector<size_t> columnSizes(schemaSize);
+        std::vector<std::function<void(parquet::StreamReader & , void * , int)>> deserializers(schemaSize);
 
-        // Initialize the StreamReader
-        parquet::StreamReader stream{parquet::ParquetFileReader::Open(buffer_reader)};
-
-        // Deserialize data using StreamReader
-        while (!stream.eof()) {
-            for (int colIdx = 0; colIdx < schemaSize; ++colIdx) {
-                const auto &attr = xdbcEnv->schema[colIdx];
-
-                void *dest = nullptr;
-
-                if (xdbcEnv->iformat == 1) {
-                    dest = writeBuffPtr + numRows * xdbcEnv->tuple_size + columnOffsets[colIdx];
-                } else if (xdbcEnv->iformat == 2) {
-                    dest = writeBuffPtr + columnOffsets[colIdx] * xdbcEnv->tuples_per_buffer +
-                           numRows * attr.size;
-                }
-
-                //TODO: check if we can pass the preallocated strings to our deserializers
-                if (attr.tpe[0] == 'S') {
-                    auto &buffer = stringBuffers[colIdx];
-                    stream >> buffer;
-                    std::memcpy(dest, buffer.data(), attr.size);
-                } else {
-                    // Use deserializer for other types
-                    deserializers[colIdx](stream, dest, attr.size);
-                }
+        size_t rowSize = 0;
+        for (size_t i = 0; i < schemaSize; ++i) {
+            const auto &attr = xdbcEnv->schema[i];
+            columnOffsets[i] = rowSize;
+            if (attr.tpe[0] == 'I') {
+                columnSizes[i] = 4;  // sizeof(int)
+                deserializers[i] = deserialize<int>;
+            } else if (attr.tpe[0] == 'D') {
+                columnSizes[i] = 8;
+                deserializers[i] = deserialize<double>;
+            } else if (attr.tpe[0] == 'C') {
+                columnSizes[i] = 1;  // sizeof(char)
+                deserializers[i] = deserialize<char>;
+            } else if (attr.tpe[0] == 'S') {
+                columnSizes[i] = attr.size;
+                deserializers[i] = deserialize<std::string>;
+            } else {
+                throw std::runtime_error("Unsupported column type: " + attr.tpe);
             }
+            rowSize += columnSizes[i];
+        }
 
-            // End of row processing
-            stream >> parquet::EndRow;
-            ++numRows;
-            ++totalThreadWrittenTuples;
-
-            if (numRows == xdbcEnv->tuples_per_buffer) {
-                // Write header and push buffer
-                Header head{};
-                head.totalTuples = numRows;
-                std::memcpy(bp[writeBuff].data(), &head, sizeof(Header));
-
-                xdbcEnv->pts->push(
-                        ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
-
-                xdbcEnv->compBufferPtr->push(writeBuff);
-
-                writeBuff = xdbcEnv->freeBufferPtr->pop();
-                xdbcEnv->pts->push(
-                        ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
-
-                writeBuffPtr = bp[writeBuff].data() + sizeof(Header);
-                totalThreadWrittenBuffers++;
-                numRows = 0;
+        // Preallocate fixed-size buffers for string attributes
+        std::vector<std::string> stringBuffers(schemaSize);
+        for (int colIdx = 0; colIdx < schemaSize; ++colIdx) {
+            const auto &attr = xdbcEnv->schema[colIdx];
+            if (attr.tpe[0] == 'S') { // STRING or CHAR
+                stringBuffers[colIdx].resize(attr.size, '\0'); // Fixed size with null padding
             }
         }
 
-        // Return the used buffer to freeBufferPtr
-        xdbcEnv->freeBufferPtr->push(deserBuff);
-        deserBuff = xdbcEnv->deserBufferPtr->pop();
-        if (deserBuff == -1)
-            break;
-    }
+        while (true) {
+            // Get buffer data from deserBuff
+            const auto *bufferPtr = bp[deserBuff].data() + sizeof(Header);
 
-    // Handle remaining rows
-    if (numRows > 0) {
-        Header head{};
-        head.totalTuples = numRows;
-        std::memcpy(bp[writeBuff].data(), &head, sizeof(Header));
-        xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+            // Reinterpret the start of the buffer as the Header
+            auto header = reinterpret_cast<Header *>(bp[deserBuff].data());
+            parquetFileSize = header->totalSize;
 
-        xdbcEnv->compBufferPtr->push(writeBuff);
+            // Wrap the buffer with an Arrow BufferReader
+            auto arrow_buffer = std::make_shared<arrow::Buffer>(reinterpret_cast<const uint8_t *>(bufferPtr),
+                                                                parquetFileSize);
+            auto buffer_reader = std::make_shared<arrow::io::BufferReader>(arrow_buffer);
 
-        ++totalThreadWrittenBuffers;
+            // Initialize the StreamReader
+            parquet::StreamReader stream{parquet::ParquetFileReader::Open(buffer_reader)};
+
+            // Deserialize data using StreamReader
+            while (!stream.eof()) {
+                for (int colIdx = 0; colIdx < schemaSize; ++colIdx) {
+                    const auto &attr = xdbcEnv->schema[colIdx];
+
+                    void *dest = nullptr;
+
+                    if (xdbcEnv->iformat == 1) {
+                        dest = writeBuffPtr + numRows * xdbcEnv->tuple_size + columnOffsets[colIdx];
+                    } else if (xdbcEnv->iformat == 2) {
+                        dest = writeBuffPtr + columnOffsets[colIdx] * xdbcEnv->tuples_per_buffer +
+                               numRows * attr.size;
+                    }
+
+                    //TODO: check if we can pass the preallocated strings to our deserializers
+                    if (attr.tpe[0] == 'S') {
+                        auto &buffer = stringBuffers[colIdx];
+                        stream >> buffer;
+                        std::memcpy(dest, buffer.data(), attr.size);
+                    } else {
+                        // Use deserializer for other types
+                        deserializers[colIdx](stream, dest, attr.size);
+                    }
+                }
+
+                // End of row processing
+                stream >> parquet::EndRow;
+                ++numRows;
+                ++totalThreadWrittenTuples;
+
+                if (numRows == xdbcEnv->tuples_per_buffer) {
+                    // Write header and push buffer
+                    Header head{};
+                    head.totalTuples = numRows;
+                    head.totalSize = xdbcEnv->tuple_size * xdbcEnv->tuples_per_buffer;
+                    std::memcpy(bp[writeBuff].data(), &head, sizeof(Header));
+
+                    xdbcEnv->pts->push(
+                            ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+
+                    xdbcEnv->compBufferPtr->push(writeBuff);
+
+                    writeBuff = xdbcEnv->freeBufferPtr->pop();
+                    xdbcEnv->pts->push(
+                            ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
+
+                    writeBuffPtr = bp[writeBuff].data() + sizeof(Header);
+                    totalThreadWrittenBuffers++;
+                    numRows = 0;
+                }
+            }
+
+            // Return the used buffer to freeBufferPtr
+            xdbcEnv->freeBufferPtr->push(deserBuff);
+            deserBuff = xdbcEnv->deserBufferPtr->pop();
+            if (deserBuff == -1)
+                break;
+        }
+
+        // Handle remaining rows
+        if (numRows > 0) {
+            spdlog::get("XDBC.SERVER")->info("PQ Deser thread {0} has {1} remaining tuples",
+                                             thr, numRows);
+            Header head{};
+            head.totalTuples = numRows;
+            head.totalSize = head.totalTuples * xdbcEnv->tuple_size;
+            std::memcpy(bp[writeBuff].data(), &head, sizeof(Header));
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+
+            xdbcEnv->compBufferPtr->push(writeBuff);
+
+            ++totalThreadWrittenBuffers;
+        }
     }
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "end"});
 
@@ -271,7 +290,7 @@ int PQReader::readPQ(int thr) {
         // Iterate over the range of partitions
         for (int partitionId = curPart.startOff; partitionId < curPart.endOff; ++partitionId) {
             // Construct the file name for the current partition
-            std::string fileName = baseDir + "lineitem_split_part" + std::to_string(partitionId) + ".parquet";
+            std::string fileName = baseDir + tableName + "_part" + std::to_string(partitionId) + ".parquet";
 
             // Open the Parquet file
             std::ifstream parquetFile(fileName, std::ios::binary | std::ios::in);
@@ -283,7 +302,6 @@ int PQReader::readPQ(int thr) {
             auto writeBuff = xdbcEnv->freeBufferPtr->pop();
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
 
-
             auto writeBuffPtr = bp[writeBuff].data();
 
             // Read the entire file into the buffer
@@ -291,15 +309,18 @@ int PQReader::readPQ(int thr) {
             size_t fileSize = parquetFile.tellg();
             parquetFile.seekg(0, std::ios::beg);
 
+            Header head{};
+            head.totalSize = fileSize;
+            head.totalTuples = 0;
 
-            std::memcpy(writeBuffPtr, &fileSize, sizeof(size_t));
+            std::memcpy(writeBuffPtr, &head, sizeof(Header));
 
             // Ensure the buffer is large enough
             if (fileSize > xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size) {
                 throw std::runtime_error("Parquet file is larger than the buffer size.");
             }
 
-            parquetFile.read(reinterpret_cast<char *>(writeBuffPtr + sizeof(size_t)), fileSize);
+            parquetFile.read(reinterpret_cast<char *>(writeBuffPtr + sizeof(Header)), fileSize);
             if (parquetFile.gcount() != fileSize) {
                 throw std::runtime_error("Failed to read the entire Parquet file.");
             }
