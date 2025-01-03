@@ -4,7 +4,7 @@
 #include "../csv.hpp"
 #include "../../xdbcserver.h"
 #include <queue>
-#include "../deserializers.h"
+#include "deserializers.h"
 
 
 void handle_error(const char *msg) {
@@ -328,6 +328,7 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                     if (xdbcEnv->iformat == 1) {
                         write = startWritePtr + bufferTupleId * xdbcEnv->tuple_size + bytesInTuple;
                     } else if (xdbcEnv->iformat == 2) {
+                        //TODO: check this
                         write = startWritePtr + bytesInTuple * xdbcEnv->tuples_per_buffer +
                                 bufferTupleId * attribute.size;
                     }
