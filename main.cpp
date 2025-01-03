@@ -211,6 +211,7 @@ int main(int argc, char *argv[]) {
     RuntimeEnv xdbcEnv;
     handleCMDParams(argc, argv, xdbcEnv);
 
+    xdbcEnv.stop_updation = 0;
     //Setup websocket interface for controller
     std::thread io_thread;
     WebSocketClient ws_client("xdbc-controller", "8003");

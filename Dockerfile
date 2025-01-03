@@ -83,6 +83,7 @@ ADD xdbcserver.h /xdbc-server/
 ADD metrics_calculator.h /xdbc-server/
 ADD Compression /xdbc-server/Compression
 ADD DataSources /xdbc-server/DataSources
+ADD ControllerInterface /xdbc-server/ControllerInterface
 RUN ls /xdbc-server
 
 # Prepare build environment
