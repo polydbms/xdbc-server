@@ -8,6 +8,7 @@
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
 #include "metrics_calculator.h"
+#include "ControllerInterface/WebSocketClient.h"
 
 using namespace std;
 namespace po = boost::program_options;
@@ -119,6 +120,85 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
 
 }
 
+nlohmann::json metrics_convert(RuntimeEnv& env) {
+    nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
+    //auto env_pts = env->pts->copyAll(); 
+    
+    if (env.stop_updation == 0){
+
+        //auto component_metrics_ = calculate_metrics(env_pts, env->buffer_size);
+        std::unordered_map<std::string, Metrics> component_metrics_;
+        component_metrics_["read"] = Metrics{4791, 2967, 1824, 253.392, 409.168, 11.5, 9.1, 13.2, 6.3, 8.0};
+        component_metrics_["deser"] = Metrics{5150, 4339.06, 813.25, 252.744, 18.7494, 9.8, 7.5, 10.6, 4.2, 5.8};
+        component_metrics_["comp"] = Metrics{5521.5, 4878, 643, 235.759, 133.435, 12.1, 10.3, 14.7, 6.7, 9.3};
+        component_metrics_["send"] = Metrics{5522, 3121, 2400, 235.739, 417.094, 11.2, 9.4, 13.5, 5.9, 8.5};
+
+
+        for (const auto& pair : component_metrics_) {
+            nlohmann::json metric_object = nlohmann::json::object();
+            const Metrics& metric = pair.second;
+
+
+            metric_object["waitingTime_ms"] = metric.waiting_time_ms;
+            metric_object["processingTime_ms"] = metric.processing_time_ms;
+            metric_object["totalTime_ms"] = metric.overall_time_ms;
+
+            metric_object["totalThroughput"] = metric.total_throughput;
+            metric_object["perBufferThroughput"] = metric.per_buffer_throughput;
+
+            metrics_json[pair.first] = metric_object;
+        }
+    }
+    return metrics_json;
+}
+
+void env_convert(RuntimeEnv& env, const nlohmann::json& env_json) {
+    try {
+        // Acquire the lock to ensure thread-safe access to env_
+        //std::lock_guard<std::mutex> lock(env_mutex);
+        // Assuming `env_json` is a JSON object
+
+        const auto& env_object = env_json;
+        RuntimeEnv env_;
+        env_.transfer_id = std::stoll(env_json.at("transferID").get<std::string>());
+        env_.system = env_json.at("system").get<std::string>();
+        env_.compression_algorithm = env_json.at("compressionType").get<std::string>();
+        env_.iformat = std::stoi(env_json.at("intermediateFormat").get<std::string>());
+        env_.buffer_size = std::stoi(env_json.at("bufferSize").get<std::string>());
+        env_.buffers_in_bufferpool = std::stoi(env_json.at("bufferpoolSize").get<std::string>()) / env_.buffer_size;
+        env_.sleep_time = std::chrono::milliseconds(std::stoll(env_json.at("sleepTime").get<std::string>()));
+        env_.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
+        env_.read_partitions = std::stoi(env_json.at("readPartitions").get<std::string>());
+        env_.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
+        env_.network_parallelism = std::stoi(env_json.at("netParallelism").get<std::string>());
+        env_.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
+
+
+        if (env.stop_updation == 0){
+                
+            // Lock the mutex to ensure exclusive access to env_
+            std::lock_guard<std::mutex> lock(env.env_mutex);
+
+            // //Safely copy env_.write_parallelism to env->write_parallelism
+            env.transfer_id = env_.transfer_id;
+            env.system = env_.system;
+            env.compression_algorithm = env_.compression_algorithm;
+            env.iformat = env_.iformat;
+            env.buffer_size = env_.buffer_size;
+            env.buffers_in_bufferpool = env_.buffers_in_bufferpool;
+            env.sleep_time = env_.sleep_time;
+            env.read_parallelism = env_.read_parallelism;
+            env.read_partitions = env_.read_partitions;
+            env.deser_parallelism = env_.deser_parallelism;
+            env.network_parallelism = env_.network_parallelism;
+            env.compression_parallelism = env_.compression_parallelism;
+
+            env.env_condition.notify_all();
+        }
+    } catch (const std::exception& e) {
+        std::cerr << "Error converting env JSON: " << e.what() << std::endl;
+    }
+}
 
 int main(int argc, char *argv[]) {
 
@@ -126,6 +206,25 @@ int main(int argc, char *argv[]) {
 
     RuntimeEnv xdbcEnv;
     handleCMDParams(argc, argv, xdbcEnv);
+
+    // Setup websocket interface for controller
+    // xdbcEnv.stop_updation = 0;
+    // const std::string host = "xdbc-controller"; // controller IP 172.17.0.1
+    // const std::string port = "8003";      // controller port
+    // WebSocketClient ws_client(host, port);
+    // ws_client.start();// Start the WebSocket client communication
+    // // Run io_context in a separate thread to allow other tasks in the main thread
+    // std::thread io_thread([&]() {
+    //     // Now passing functions to 'run' which starts the communication
+    //     ws_client.run(
+    //         std::bind(&metrics_convert, std::ref(xdbcEnv)),  // Metrics conversion function
+    //         std::bind(&env_convert, std::ref(xdbcEnv), std::placeholders::_1)  // Environment conversion function
+    //     );
+    // });
+    // while (!ws_client.is_active()) { // Wait until the client is active
+    //     std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Brief delay before checking again
+    // }
+    //xdbcEnv.stop_updation = 1;
 
     auto start = std::chrono::steady_clock::now();
 
@@ -208,6 +307,8 @@ int main(int argc, char *argv[]) {
              << component_metrics["send"].per_buffer_throughput << ","
              << std::get<3>(loads) << "\n";
     csv_file.close();
+
+    //ws_client.stop();
 
     return 0;
 }

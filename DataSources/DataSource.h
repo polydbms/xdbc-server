@@ -94,6 +94,9 @@ struct RuntimeEnv {
     std::vector<std::tuple<long long, size_t, size_t, size_t, size_t>> queueSizes;
     std::atomic<bool> monitor;
 
+    std::atomic<int> stop_updation;
+    std::condition_variable env_condition; // Condition variable for thread synchronization
+    std::mutex env_mutex;                  // Mutex for protecting shared data
     PTQ_ptr pts;
 
 };
