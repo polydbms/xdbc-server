@@ -223,7 +223,7 @@ int main(int argc, char *argv[]) {
     while (!ws_client.is_active()) { // Wait until the client is active
         std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Brief delay before checking again
     }
-    xdbcEnv.stop_updation = 1;
+    //xdbcEnv.stop_updation = 1;
 
     auto start = std::chrono::steady_clock::now();
 
