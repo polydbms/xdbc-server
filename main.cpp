@@ -43,7 +43,8 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
             ("transfer-id,tid", po::value<long>()->default_value(0),
              "Set the transfer id.\nDefault: 0")
             ("profiling-breakpoint", po::value<int>()->default_value(100),
-             "Set profiling breakpoint.\nDefault: 100");
+             "Set profiling breakpoint.\nDefault: 100")
+            ("spawn-source", po::value<int>()->default_value(0), "Set spawn source (0 or 1).\nDefault: 0");
 
     po::positional_options_description p;
     p.add("compression-type", 1);
@@ -112,6 +113,10 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
     if (vm.count("transfer-id")) {
         spdlog::get("XDBC.SERVER")->info("Transfer id: {0}", vm["transfer-id"].as<long>());
         env.transfer_id = vm["transfer-id"].as<long>();
+    }
+    if (vm.count("spawn-source")) {
+        spdlog::get("XDBC.SERVER")->info("Spawn source: {0}", vm["spawn-source"].as<int>());
+        env.spawn_source = vm["spawn-source"].as<int>();
     }
 
     env.tuple_size = 0;
@@ -207,23 +212,20 @@ int main(int argc, char *argv[]) {
     handleCMDParams(argc, argv, xdbcEnv);
 
     //Setup websocket interface for controller
-    xdbcEnv.stop_updation = 0;
-    const std::string host = "xdbc-controller"; // controller IP 172.17.0.1
-    const std::string port = "8003";      // controller port
-    WebSocketClient ws_client(host, port);
-    ws_client.start();// Start the WebSocket client communication
-    // Run io_context in a separate thread to allow other tasks in the main thread
-    std::thread io_thread([&]() {
-        // Now passing functions to 'run' which starts the communication
-        ws_client.run(
-            std::bind(&metrics_convert, std::ref(xdbcEnv)),  // Metrics conversion function
-            std::bind(&env_convert, std::ref(xdbcEnv), std::placeholders::_1)  // Environment conversion function
-        );
-    });
-    while (!ws_client.is_active()) { // Wait until the client is active
-        std::this_thread::sleep_for(std::chrono::milliseconds(100));  // Brief delay before checking again
+    std::thread io_thread;
+    WebSocketClient ws_client("xdbc-controller", "8003");
+    if (xdbcEnv.spawn_source == 1) {
+        ws_client.start();
+        io_thread = std::thread([&]() {
+            ws_client.run(
+                std::bind(&metrics_convert, std::ref(xdbcEnv)),
+                std::bind(&env_convert, std::ref(xdbcEnv), std::placeholders::_1)
+            );
+        });
+        while (!ws_client.is_active()) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
     }
-    //xdbcEnv.stop_updation = 1;
 
     auto start = std::chrono::steady_clock::now();
 
@@ -307,7 +309,12 @@ int main(int argc, char *argv[]) {
              << std::get<3>(loads) << "\n";
     csv_file.close();
 
-    //ws_client.stop();
+    if (xdbcEnv.spawn_source == 1) {
+        ws_client.stop();
+        if (io_thread.joinable()) {
+            io_thread.join();
+        }
+    }
 
     return 0;
 }
