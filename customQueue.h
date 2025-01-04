@@ -29,4 +29,20 @@ public:
         //std::unique_lock<std::mutex> lock(this->d_mutex);
         return d_queue.size();
     }
+
+    std::vector<T> copy_newElements() {
+        static size_t lastCopiedIndex = 0; // Tracks the last copied position
+        std::vector<T> new_elements;      // To store new elements
+        auto current_index = d_queue.size();
+        {
+            //std::unique_lock<std::mutex> lock(this->d_mutex); // Lock for thread safety
+            if (lastCopiedIndex < current_index) { // Check if there are new elements
+                new_elements.assign(d_queue.rbegin(), d_queue.rbegin() + (d_queue.size() - lastCopiedIndex)); // Reverse copy the new elements
+                lastCopiedIndex = current_index;// Update the index for the next call
+            }
+        }
+        return new_elements; // Return new elements in reverse order
+    }
+
+
 };

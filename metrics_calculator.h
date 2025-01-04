@@ -57,8 +57,13 @@ calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buf
             std::chrono::duration<double, std::micro> waiting_time = std::chrono::duration<double, std::micro>::zero();
             std::chrono::duration<double, std::micro> processing_time = std::chrono::duration<double, std::micro>::zero();
             bool has_pop_time = false;
+            bool has_push_time = false;
             bool has_start_time = false;
+            bool has_end_time = false;
             size_t thread_buffers_processed = 0;
+
+            const auto& first_element = events.front();  // Store the first event in the loop
+            const auto& last_element = events.back();    // Store the last event in the loop
 
             for (const auto &event: events) {
                 if (event.event == "start") {
@@ -66,7 +71,7 @@ calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buf
                     has_start_time = true;
                 } else if (event.event == "pop") {
                     pop_time = event.timestamp;
-                    if (has_pop_time) {
+                    if (has_push_time) {
                         waiting_time += pop_time - push_time; // Waiting time is pop_time - previous push_time
                     } else if (has_start_time) {
                         waiting_time += pop_time - start_time; // Initial waiting time is pop_time - start_time
@@ -74,10 +79,14 @@ calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buf
                     has_pop_time = true;
                 } else if (event.event == "push") {
                     push_time = event.timestamp;
-                    processing_time += push_time - pop_time; // Processing time is push_time - pop_time
-                    thread_buffers_processed++;
+                    has_push_time = true;
+                    if (has_pop_time) {
+                        processing_time += push_time - pop_time; // Processing time is push_time - pop_time
+                        thread_buffers_processed++;
+                    }
                 } else if (event.event == "end") {
                     end_time = event.timestamp;
+                    has_end_time = true;
                     if (has_pop_time) {
                         processing_time += end_time - push_time; // Finalize the processing time
                     }
@@ -86,8 +95,14 @@ calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buf
 
             metrics.waiting_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(waiting_time).count();
             metrics.processing_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(processing_time).count();
-            metrics.overall_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::duration<double>(end_time - start_time)).count();
+            if(has_end_time && has_start_time) {
+                metrics.overall_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::duration<double>(end_time - start_time)).count();
+            }
+            else    {
+                metrics.overall_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::duration<double>(last_element.timestamp - first_element.timestamp)).count();
+            }
             total_buffers_processed += thread_buffers_processed;
 
             // Calculate the total throughput in bytes per second for this thread

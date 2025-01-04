@@ -129,14 +129,10 @@ nlohmann::json metrics_convert(RuntimeEnv& env) {
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     //auto env_pts = env->pts->copyAll(); 
     
-    if (env.stop_updation == 0){
-
-        //auto component_metrics_ = calculate_metrics(env_pts, env->buffer_size);
-        std::unordered_map<std::string, Metrics> component_metrics_;
-        component_metrics_["read"] = Metrics{4791, 2967, 1824, 253.392, 409.168, 11.5, 9.1, 13.2, 6.3, 8.0};
-        component_metrics_["deser"] = Metrics{5150, 4339.06, 813.25, 252.744, 18.7494, 9.8, 7.5, 10.6, 4.2, 5.8};
-        component_metrics_["comp"] = Metrics{5521.5, 4878, 643, 235.759, 133.435, 12.1, 10.3, 14.7, 6.7, 9.3};
-        component_metrics_["send"] = Metrics{5522, 3121, 2400, 235.739, 417.094, 11.2, 9.4, 13.5, 5.9, 8.5};
+    if ((env.stop_updation == 0)&&(env.pts)){
+        std::vector<ProfilingTimestamps> env_pts;
+        env_pts = env.pts->copy_newElements();
+        auto component_metrics_ = calculate_metrics(env_pts, env.buffer_size);
 
 
         for (const auto& pair : component_metrics_) {
@@ -237,7 +233,7 @@ int main(int argc, char *argv[]) {
     auto total_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
 
     spdlog::get("XDBC.SERVER")->info("Total elapsed time: {} ms", total_time);
-
+    xdbcEnv.stop_updation = 1;
     auto pts = std::vector<ProfilingTimestamps>(xdbcEnv.pts->size());
     while (xdbcEnv.pts->size() != 0)
         pts.push_back(xdbcEnv.pts->pop());

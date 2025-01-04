@@ -91,7 +91,7 @@ void WebSocketClient::periodic_communication() {
             }
 
             // Wait for 1 second before next communication
-            std::this_thread::sleep_for(std::chrono::seconds(1));
+            std::this_thread::sleep_for(std::chrono::seconds(2));
             active_ = true;
         }
     } catch (const std::exception& e) {
