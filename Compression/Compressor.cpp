@@ -20,20 +20,24 @@ void Compressor::compress(int thr, const std::string &compName) {
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "start"});
 
-    int emptyCtr = 0;
     int inBufferId;
     int outBufferId;
     long compressedBuffers = 0;
 
-    while (emptyCtr < 1) {
+    while (true) {
 
         inBufferId = xdbcEnv->compBufferPtr->pop();
 
+        if (inBufferId == -1)
+            break;
+
         xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "pop"});
 
-        if (inBufferId == -1) {
-            spdlog::get("XDBC.SERVER")->info("Comp thread {0} received poison pill", thr);
-            emptyCtr++;
+        if (!Compressor::getCompId(xdbcEnv->compression_algorithm)) {
+            //nothing to do, forward buffer
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "push"});
+
+            xdbcEnv->sendBufferPtr->push(inBufferId);
         } else {
 
             outBufferId = xdbcEnv->freeBufferPtr->pop();
@@ -74,7 +78,6 @@ void Compressor::compress(int thr, const std::string &compName) {
             if (totalSize <= 0)
                 spdlog::get("XDBC.SERVER")->error("Compress thread {0} compression: {1}, totalSize: {2}",
                                                   thr, compId, totalSize);
-
 
             //TODO: create more sophisticated header with checksum etc
 
@@ -124,17 +127,17 @@ size_t Compressor::getCompId(const std::string &name) {
 
     if (name == "nocomp")
         return 0;
-    if (name == "zstd")
+    else if (name == "zstd")
         return 1;
-    if (name == "snappy")
+    else if (name == "snappy")
         return 2;
-    if (name == "lzo")
+    else if (name == "lzo")
         return 3;
-    if (name == "lz4")
+    else if (name == "lz4")
         return 4;
-    if (name == "zlib")
+    else if (name == "zlib")
         return 5;
-    if (name == "cols")
+    else if (name == "cols")
         return 6;
 
     return 0;
