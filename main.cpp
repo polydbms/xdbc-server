@@ -180,7 +180,7 @@ int main(int argc, char *argv[]) {
 
     std::ostringstream headerStream;
     headerStream << "transfer_id,total_time,"
-                 << "read_wait_time,read_proc_time,read_throughput,read_throughput_pb,read_load,"
+                 << "read_wait_time,read_proc_time,read_throughput,read_throughput_pb,free_load,"
                  << "deser_wait_time,deser_proc_time,deser_throughput,deser_throughput_pb,deser_load,"
                  << "comp_wait_time,comp_proc_time,comp_throughput,comp_throughput_pb,comp_load,"
                  << "send_wait_time,send_proc_time,send_throughput,send_throughput_pb,send_load\n";
