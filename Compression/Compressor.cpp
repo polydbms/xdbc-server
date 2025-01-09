@@ -46,19 +46,18 @@ void Compressor::compress(int thr, const std::string &compName) {
             size_t compId = Compressor::getCompId(xdbcEnv->compression_algorithm);
 
             //spdlog::get("XDBC.SERVER")->warn("Send thread {0} entering compression", thr);
-            auto head1 = reinterpret_cast<Header *>(bp[inBufferId].data());
+            auto headIn = reinterpret_cast<Header *>(bp[inBufferId].data());
 
             auto decompressedPtr = bp[inBufferId].data() + sizeof(Header);
             std::array<size_t, MAX_ATTRIBUTES> compressed_sizes = Compressor::compress_buffer(
                     xdbcEnv->compression_algorithm, decompressedPtr, bp[outBufferId].data() + sizeof(Header),
-                    head1->totalSize,
+                    headIn->totalSize,
                     xdbcEnv->tuples_per_buffer, xdbcEnv->schema);
 
             size_t totalSize = 0;
             //TODO: check if schema larger than MAX_ATTRIBUTES
 
-            if (xdbcEnv->compression_algorithm == "cols" &&
-                compressed_sizes[0] == xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size)
+            if (compId < 6)
                 totalSize = compressed_sizes[0];
             else {
                 for (int i = 0; i < xdbcEnv->schema.size(); i++) {
@@ -66,29 +65,21 @@ void Compressor::compress(int thr, const std::string &compName) {
                 }
             }
 
-            if (totalSize > xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size) {
-                spdlog::get("XDBC.SERVER")->warn("Compress thread {} compression more than buffer {}/{}", thr,
-                                                 totalSize, xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size);
+            if (totalSize >= xdbcEnv->buffer_size * 1024 || totalSize <= 0) {
+                spdlog::get("XDBC.SERVER")->error("Compress thread {} with comp {} invalid size {}/{}",
+                                                  thr, compId, totalSize, xdbcEnv->buffer_size * 1024);
                 compId = 0;
             }
-            if (totalSize == xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size) {
-                compId = 0;
-            }
-
-            if (totalSize <= 0)
-                spdlog::get("XDBC.SERVER")->error("Compress thread {0} compression: {1}, totalSize: {2}",
-                                                  thr, compId, totalSize);
 
             //TODO: create more sophisticated header with checksum etc
 
             Header head{};
-            head.totalTuples = head1->totalTuples;
+            head.totalTuples = headIn->totalTuples;
             head.compressionType = compId;
             head.totalSize = totalSize;
-
-            head.intermediateFormat = static_cast<size_t>(xdbcEnv->iformat);
+            head.intermediateFormat = headIn->intermediateFormat;
             //head.crc = compute_crc(bp[bufferId].data(), totalSize);
-            head.attributeComp;
+            //head.attributeComp;
             //head.attributeSize = compressed_sizes;
 
             std::copy(compressed_sizes.begin(), compressed_sizes.end(), head.attributeSize);
@@ -96,20 +87,22 @@ void Compressor::compress(int thr, const std::string &compName) {
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "push"});
 
             if (compId == 0) {
-                //no compression, or comp unsuccessful
+                //comp unsuccessful
                 std::memcpy(bp[inBufferId].data(), &head, sizeof(Header));
                 //forward in buffer with new header
                 xdbcEnv->sendBufferPtr->push(inBufferId);
                 //release out buffer
                 xdbcEnv->freeBufferPtr->push(outBufferId);
             } else {
+                /*spdlog::get("XDBC.SERVER")->warn("Entering compid {}, totalSize {}, tuples {}, freeQ size {}", compId,
+                                                 head.totalSize, head.totalTuples, xdbcEnv->freeBufferPtr->size());*/
                 std::memcpy(bp[outBufferId].data(), &head, sizeof(Header));
                 xdbcEnv->sendBufferPtr->push(outBufferId);
                 xdbcEnv->freeBufferPtr->push(inBufferId);
+                //spdlog::get("XDBC.SERVER")->warn("Exiting, free size {}", xdbcEnv->freeBufferPtr->size());
+
             }
-
             compressedBuffers++;
-
         }
     }
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "end"});

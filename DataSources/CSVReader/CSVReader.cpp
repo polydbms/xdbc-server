@@ -315,7 +315,6 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
     } else {
 
         int outBid;
-
         size_t readOffset = 0;
         const char *endPtr;
         size_t len;
@@ -438,6 +437,7 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                     Header head{};
                     head.totalTuples = bufferTupleId;
                     head.totalSize = head.totalTuples * xdbcEnv->tuple_size;
+                    head.intermediateFormat = xdbcEnv->iformat;
                     memcpy(bp[outBid].data(), &head, sizeof(Header));
                     bufferTupleId = 0;
 
@@ -462,6 +462,7 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                     Header head{};
                     head.totalTuples = bufferTupleId;
                     head.totalSize = serializedSize;
+                    head.intermediateFormat = xdbcEnv->iformat;
                     memcpy(bp[outBid].data(), &head, sizeof(Header));
 
                     bufferTupleId = 0;
@@ -475,24 +476,19 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
                     for (auto &builder: arrowBuilders) {
                         builder->Reset();
                     }
-
                     outBid = xdbcEnv->freeBufferPtr->pop();
                 }
-
             }
 
             //we are done with reading the incoming buffer contents, return it and get a new one
-            xdbcEnv->freeBufferPtr->push(inBid);
-
-            inBid = xdbcEnv->deserBufferPtr->pop();
-            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
-
             readOffset = 0;
+            xdbcEnv->freeBufferPtr->push(inBid);
+            inBid = xdbcEnv->deserBufferPtr->pop();
             if (inBid == -1)
                 break;
+            xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
 
         }
-
 
         //remaining tuples
         if (bufferTupleId > 0 && bufferTupleId != xdbcEnv->tuples_per_buffer &&
@@ -504,6 +500,7 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
             Header head{};
             head.totalTuples = bufferTupleId;
             head.totalSize = head.totalTuples * xdbcEnv->tuple_size;
+            head.intermediateFormat = xdbcEnv->iformat;
             memcpy(bp[outBid].data(), &head, sizeof(Header));
 
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
@@ -523,6 +520,7 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
             Header head{};
             head.totalTuples = bufferTupleId;
             head.totalSize = serializedSize;
+            head.intermediateFormat = xdbcEnv->iformat;
             memcpy(bp[outBid].data(), &head, sizeof(Header));
 
             totalThreadWrittenBuffers++;
