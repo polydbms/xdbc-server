@@ -74,38 +74,28 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
     //initialize partitions queue
     xdbcEnv.partPtr = std::make_shared<customQueue<Part>>();
 
-    //TODO: introduce checks for queue capacities, based on existing buffers
-
-    //calculate buffers per queue
-    int total_consumer_threads = xdbcEnv.deser_parallelism +
-                                 xdbcEnv.compression_parallelism + xdbcEnv.network_parallelism;
-
-    int total_producer_threads = xdbcEnv.read_parallelism + xdbcEnv.deser_parallelism +
-                                 xdbcEnv.compression_parallelism + xdbcEnv.network_parallelism;
+    int total_workers = xdbcEnv.read_parallelism + xdbcEnv.deser_parallelism +
+                        xdbcEnv.compression_parallelism + xdbcEnv.network_parallelism;
 
     //each producer thread always needs a buffer from the free ones
-    int available_buffers_for_queues = xdbcEnv.buffers_in_bufferpool - total_producer_threads;
+    int available_buffers_for_queues = xdbcEnv.buffers_in_bufferpool - total_workers;
 
-    if (xdbcEnv.buffers_in_bufferpool < total_producer_threads + total_consumer_threads ||
-        available_buffers_for_queues < total_consumer_threads) {
+    if (xdbcEnv.buffers_in_bufferpool < total_workers ||
+        available_buffers_for_queues < total_workers) {
 
         spdlog::get("XDBC.SERVER")->error(
                 "Buffer allocation error: Total buffers: {0}. "
-                "\nRequired buffers:  Total: {3}, Producers: {1}, Consumers: {2} "
-                "\nReserved for producers: {4}, Available for queues: {5}, Required for consumer threads: {6}. "
-                "\nIncrease the buffer pool size to at least {7}.",
+                "\nRequired buffers:  Total: {1},"
+                "\nAvailable for queues: {2}. "
+                "\nIncrease the buffer pool size to at least {1}.",
                 xdbcEnv.buffers_in_bufferpool,
-                total_producer_threads, total_consumer_threads,
-                total_producer_threads + total_consumer_threads,
-                total_producer_threads, available_buffers_for_queues,
-                total_consumer_threads,
-                total_producer_threads + total_consumer_threads
-        );
+                total_workers,
+                available_buffers_for_queues);
 
     }
 
-    int queueCapacityPerComp = available_buffers_for_queues / 3;
-    int deserQueueCapacity = queueCapacityPerComp + available_buffers_for_queues % 3;
+    int queueCapacityPerComp = available_buffers_for_queues / 4;
+    int deserQueueCapacity = queueCapacityPerComp + available_buffers_for_queues % 4;
 
     //initialize deser queue(s)
     xdbcEnv.deserBufferPtr = std::make_shared<customQueue<int>>();
