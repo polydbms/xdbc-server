@@ -184,7 +184,7 @@ std::tuple<double, double, double, double> printAndReturnAverageLoad(RuntimeEnv 
         ret = std::tuple(avgReadBufferIdsSize, avgDeserBufferIdsSize, avgCompressedBufferIdsSize,
                          avgNetworkBufferIdsSize);
 
-        spdlog::get("XDBC.SERVER")->info("Average Load of Queues: Reader, Deserializer, Compressor, Sender");
+        spdlog::get("XDBC.SERVER")->info("Average Load of Queues: Free, Deserializer, Compressor, Sender");
         spdlog::get("XDBC.SERVER")->info("{0}\t{1}\t{2}\t{3}",
                                          avgReadBufferIdsSize, avgDeserBufferIdsSize,
                                          avgCompressedBufferIdsSize, avgNetworkBufferIdsSize);
