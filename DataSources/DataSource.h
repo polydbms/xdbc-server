@@ -8,19 +8,20 @@
 #include <map>
 #include "../customQueue.h"
 
-//#define BUFFER_SIZE 1000
-//#define BUFFERPOOL_SIZE 1000
-//#define TUPLE_SIZE 48
-//#define SLEEP_TIME 5ms
+// #define BUFFER_SIZE 1000
+// #define BUFFERPOOL_SIZE 1000
+// #define TUPLE_SIZE 48
+// #define SLEEP_TIME 5ms
 
-struct Part {
+struct Part
+{
     int id;
     int startOff;
     long endOff;
 };
 
-
-struct shortLineitem {
+struct shortLineitem
+{
     int l_orderkey;
     int l_partkey;
     int l_suppkey;
@@ -31,7 +32,8 @@ struct shortLineitem {
     double l_tax;
 };
 
-struct shortLineitemColBatch {
+struct shortLineitemColBatch
+{
     std::vector<int> l_orderkey;
     std::vector<int> l_partkey;
     std::vector<int> l_suppkey;
@@ -42,12 +44,14 @@ struct shortLineitemColBatch {
     std::vector<double> l_tax;
 };
 
-struct SchemaAttribute {
+struct SchemaAttribute
+{
     std::string name;
     std::string tpe;
     int size;
 };
-struct ProfilingTimestamps {
+struct ProfilingTimestamps
+{
     std::chrono::high_resolution_clock::time_point timestamp;
     int thread;
     std::string component;
@@ -57,8 +61,14 @@ typedef std::shared_ptr<customQueue<int>> FBQ_ptr;
 typedef std::shared_ptr<customQueue<Part>> FPQ_ptr;
 typedef std::shared_ptr<customQueue<ProfilingTimestamps>> PTQ_ptr;
 
+struct transfer_details
+{
+    float elapsed_time = 0.0f; // Default value for elapsed_time
+    int bufProcessed = 5199;   //
+};
 
-struct RuntimeEnv {
+struct RuntimeEnv
+{
     long transfer_id;
     std::string compression_algorithm;
     int iformat;
@@ -98,11 +108,12 @@ struct RuntimeEnv {
     std::atomic<int> stop_updation;
     std::condition_variable env_condition; // Condition variable for thread synchronization
     std::mutex env_mutex;                  // Mutex for protecting shared data
+    transfer_details tf_paras;
     PTQ_ptr pts;
-
 };
 
-class DataSource {
+class DataSource
+{
 public:
     DataSource(RuntimeEnv &xdbcEnv, std::string tableName);
 
@@ -130,8 +141,6 @@ private:
 
 protected:
     std::string tableName;
-
 };
 
-
-#endif //XDBC_SERVER_DATASOURCE_H
+#endif // XDBC_SERVER_DATASOURCE_H

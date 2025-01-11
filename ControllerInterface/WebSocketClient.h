@@ -21,11 +21,12 @@ namespace asio = boost::asio;
 namespace websocket = beast::websocket;
 using json = nlohmann::json;
 
-class WebSocketClient {
+class WebSocketClient
+{
 public:
     // Constructor: Accept host and port for connection setup
-    WebSocketClient(const std::string& host, const std::string& port);
-    
+    WebSocketClient(const std::string &host, const std::string &port);
+
     // Start method: Accept function parameters to store them in class members
     void start();
 
@@ -33,8 +34,8 @@ public:
     void stop();
 
     // Run io_context and handle periodic communication
-    void run(std::function<json()> metrics_convert,
-               std::function<void(const json&)> env_convert);
+    void run(std::function<json()> metrics_convert, std::function<json()> additional_msg,
+             std::function<void(const json &)> env_convert);
 
     // Get the status of the WebSocket client
     bool is_active() const;
@@ -50,16 +51,17 @@ private:
     asio::ip::tcp::resolver resolver_;
     websocket::stream<asio::ip::tcp::socket> ws_;
 
-    asio::steady_timer timer_;  // Timer for periodic communication
+    asio::steady_timer timer_; // Timer for periodic communication
 
     // Function objects for metrics and environment conversion
     std::function<json()> metrics_convert_;
-    std::function<void(const json&)> env_convert_;
+    std::function<json()> additional_msg_;
+    std::function<void(const json &)> env_convert_;
 
     // Flag to control periodic communication thread
     std::atomic<bool> stop_thread_;
-    std::atomic<bool> operation_started_;  // Indicates if the operation has started after acknowledgment
-    std::thread periodic_thread_;  // Thread for periodic communication
+    std::atomic<bool> operation_started_; // Indicates if the operation has started after acknowledgment
+    std::thread periodic_thread_;         // Thread for periodic communication
 
     // Status variable: Indicates if the WebSocketClient is active
     std::atomic<bool> active_;
