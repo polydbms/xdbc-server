@@ -85,7 +85,6 @@ struct RuntimeEnv {
     FBQ_ptr sendBufferPtr;
     FPQ_ptr partPtr;
 
-    std::vector<bool> activeReadThreads;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
     std::vector<SchemaAttribute> schema;
