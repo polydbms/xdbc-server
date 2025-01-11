@@ -63,12 +63,9 @@ void PQReader::readData() {
     Part fP{};
     fP.id = -1;
 
-    xdbcEnv->activeReadThreads.resize(xdbcEnv->read_parallelism);
     for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
         xdbcEnv->partPtr->push(fP);
         readThreads[i] = std::thread(&PQReader::readPQ, this, i);
-        xdbcEnv->activeReadThreads[i] = true;
-
     }
 
 

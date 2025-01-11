@@ -148,12 +148,9 @@ void CSVReader::readData() {
     Part fP{};
     fP.id = -1;
 
-    xdbcEnv->activeReadThreads.resize(xdbcEnv->read_parallelism);
     for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
         xdbcEnv->partPtr->push(fP);
         readThreads[i] = std::thread(&CSVReader::readCSV, this, i);
-        xdbcEnv->activeReadThreads[i] = true;
-
     }
 
 
@@ -166,7 +163,6 @@ void CSVReader::readData() {
                                       this, i,
                                       std::ref(threadWrittenTuples[i]), std::ref(threadWrittenBuffers[i])
         );
-
     }
 
     int totalTuples = 0;
@@ -287,8 +283,6 @@ int CSVReader::readCSV(int thr) {
 
     file.close();
     spdlog::get("XDBC.SERVER")->info("Read thr {0} finished reading", thr);
-
-    xdbcEnv->activeReadThreads[thr] = false;
 
     spdlog::get("XDBC.SERVER")->info("Read thread {0} finished. #tuples: {1}, #buffers {2}",
                                      thr, tuplesRead, buffersRead);
