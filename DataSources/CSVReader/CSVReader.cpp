@@ -379,7 +379,7 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
         while (true) {
 
             const std::vector<std::byte> &curReadBufferRef = bp[inBid];
-            const Header *header = reinterpret_cast<const Header *>(curReadBufferRef.data());
+            const auto *header = reinterpret_cast<const Header *>(curReadBufferRef.data());
             const std::byte *dataAfterHeader = curReadBufferRef.data() + sizeof(Header);
 
             while (readOffset < header->totalSize) {
@@ -494,6 +494,9 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
             Header head{};
             head.totalTuples = bufferTupleId;
             head.totalSize = head.totalTuples * xdbcEnv->tuple_size;
+            if (xdbcEnv->iformat == 2)
+                head.totalSize = xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size;
+
             head.intermediateFormat = xdbcEnv->iformat;
             memcpy(bp[outBid].data(), &head, sizeof(Header));
 

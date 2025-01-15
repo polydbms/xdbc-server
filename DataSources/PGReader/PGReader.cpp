@@ -343,6 +343,8 @@ int PGReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &totalTh
         Header head{};
         head.totalTuples = bufferTupleId;
         head.totalSize = head.totalTuples * xdbcEnv->tuple_size;
+        if (xdbcEnv->iformat == 2)
+            head.totalSize = xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size;
         head.intermediateFormat = xdbcEnv->iformat;
         memcpy(bp[outBid].data(), &head, sizeof(Header));
 
