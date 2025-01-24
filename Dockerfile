@@ -38,6 +38,10 @@ RUN git clone https://github.com/LLNL/fpzip.git && cd fpzip && \
 
 RUN apt install -qy libpq-dev libpqxx-dev
 
+# install lib dependencies 
+
+RUN apt-get update && apt-get install -y libfmt-dev
+
 # install clickhouse depencencies
 
 RUN apt-get install -y libabsl-dev
@@ -50,7 +54,13 @@ RUN cd /cityhash && ./configure && make all check CXXFLAGS="-g -O3" && make inst
 
 RUN git clone https://github.com/ClickHouse/clickhouse-cpp.git
 
-RUN cd /clickhouse-cpp && rm -rf build && mkdir build && cd build && cmake .. -DWITH_SYSTEM_ABSEIL=ON && make -j8 && make install
+RUN cd /clickhouse-cpp && \
+    rm -rf build && \
+    mkdir build && \
+    cd build && \
+    cmake .. -DWITH_SYSTEM_ABSEIL=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=ON && \
+    make -j8 && \
+    make install
 
 # copy and install xdbc server
 RUN mkdir /xdbc-server

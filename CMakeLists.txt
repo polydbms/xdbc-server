@@ -14,6 +14,7 @@ set(SNAPPY_LIBRARY_PATH "/usr/lib/x86_64-linux-gnu/libsnappy.so")
 
 
 set(LIBRARY_SOURCES
+    main.cpp
     xdbcserver.cpp
     Compression/Compressor.cpp
     DataSources/PGReader/PGReader.cpp
@@ -57,6 +58,37 @@ SET(USED_LIBS ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_PROGRAM_OP
 
 #add_definitions(-DUSE_SYSTEM_ABSEIL=OFF)
 add_library(xdbcserver_lib SHARED ${LIBRARY_SOURCES})
+find_package(FPZIP REQUIRED)
+find_package(fmt 8.1.1 REQUIRED)
+find_package(FastPFOR REQUIRED)
+find_package(Snappy REQUIRED)
+find_package(PkgConfig REQUIRED)
+#pkg_check_modules(PGMAGICK REQUIRED pgmagick)
+#include_directories(${PGMAGICK_INCLUDE_DIRS})
+target_link_libraries(xdbcserver_lib
+    PRIVATE
+    clickhouse-cpp-lib
+    boost_program_options
+    boost_system
+    -lpqxx -lpq
+    lzo2 lz4 
+    cityhash
+    pqxx
+    pq
+    fpzip
+    ${FPZIP_LIBRARIES}
+    fmt::fmt 
+    spdlog::spdlog 
+    ZLIB::ZLIB  
+    spdlog::spdlog
+    FastPFOR::FastPFOR
+    Snappy::snappy
+   # ${PGMAGICK_LIBRARIES}
+)
+target_include_directories(xdbcserver_lib
+    PUBLIC
+    ${Boost_INCLUDE_DIRS}
+)
 add_executable(${PROJECT_NAME} main.cpp xdbcserver.cpp Compression/Compressor.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/DataSource.cpp)
 #add_library(clickhouse-cpp SHARED IMPORTED)
 #set_property(TARGET clickhouse-cpp PROPERTY IMPORTED_LOCATION "/usr/local/lib/libclickhouse-cpp-lib.so")
