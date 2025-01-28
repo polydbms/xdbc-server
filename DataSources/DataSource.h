@@ -19,29 +19,6 @@ struct Part {
     long endOff;
 };
 
-
-struct shortLineitem {
-    int l_orderkey;
-    int l_partkey;
-    int l_suppkey;
-    int l_linenumber;
-    double l_quantity;
-    double l_extendedprice;
-    double l_discount;
-    double l_tax;
-};
-
-struct shortLineitemColBatch {
-    std::vector<int> l_orderkey;
-    std::vector<int> l_partkey;
-    std::vector<int> l_suppkey;
-    std::vector<int> l_linenumber;
-    std::vector<double> l_quantity;
-    std::vector<double> l_extendedprice;
-    std::vector<double> l_discount;
-    std::vector<double> l_tax;
-};
-
 struct SchemaAttribute {
     std::string name;
     std::string tpe;
