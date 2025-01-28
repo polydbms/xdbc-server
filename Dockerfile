@@ -10,7 +10,7 @@ RUN apt-get upgrade -qy
 
 # install dependencies
 
-RUN apt install -qy ca-certificates lsb-release wget
+RUN apt install -qy ca-certificates lsb-release wget pip
 
 RUN wget https://apache.jfrog.io/artifactory/arrow/$(lsb_release --id --short | tr 'A-Z' 'a-z')/apache-arrow-apt-source-latest-$(lsb_release --codename --short).deb
 
@@ -55,6 +55,9 @@ RUN cd /cityhash && ./configure && make all check CXXFLAGS="-g -O3" && make inst
 RUN git clone https://github.com/ClickHouse/clickhouse-cpp.git
 
 RUN cd /clickhouse-cpp && rm -rf build && mkdir build && cd build && cmake .. -DWITH_SYSTEM_ABSEIL=ON && make -j8 && make install
+
+# install webserver for http experiments
+RUN pip install rangehttpserver
 
 # copy and install xdbc server
 RUN mkdir /xdbc-server

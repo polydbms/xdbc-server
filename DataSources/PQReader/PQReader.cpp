@@ -187,7 +187,9 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
             parquet::StreamReader stream{parquet::ParquetFileReader::Open(buffer_reader)};
 
             // Deserialize data using StreamReader
+
             while (!stream.eof()) {
+
                 for (int colIdx = 0; colIdx < schemaSize; ++colIdx) {
                     const auto &attr = xdbcEnv->schema[colIdx];
 
@@ -202,9 +204,11 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
 
                     //TODO: check if we can pass the preallocated strings to our deserializers
                     if (attr.tpe[0] == 'S') {
+                        //std::string buffer;
                         auto &buffer = stringBuffers[colIdx];
                         stream >> buffer;
-                        std::memcpy(dest, buffer.data(), attr.size);
+                        std::memset(dest, 0, attr.size);
+                        std::memcpy(dest, buffer.data(), buffer.size());
                     } else {
                         // Use deserializer for other types
                         deserializers[colIdx](stream, dest, attr.size);
@@ -221,7 +225,42 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
                     Header head{};
                     head.totalTuples = numRows;
                     head.totalSize = xdbcEnv->tuple_size * xdbcEnv->tuples_per_buffer;
+                    head.intermediateFormat = xdbcEnv->iformat;
                     std::memcpy(bp[writeBuff].data(), &head, sizeof(Header));
+
+                    ///test
+                    /*const char *dataPtr = reinterpret_cast<const char *>(bp[writeBuff].data() + sizeof(Header));
+
+                    spdlog::get("XDBC.SERVER")->info("First row values:");
+
+                    size_t offset = 0;  // Offset within the row
+                    for (const auto &att: xdbcEnv->schema) {
+                        std::ostringstream oss;
+                        oss << att.name << ": ";
+
+                        if (att.tpe == "INT") {
+                            int value = *reinterpret_cast<const int *>(dataPtr + offset);
+                            oss << value;
+                            offset += 4;
+                        } else if (att.tpe == "DOUBLE") {
+                            double value = *reinterpret_cast<const double *>(dataPtr + offset);
+                            oss << value;
+                            offset += 8;
+                        } else if (att.tpe == "CHAR") {
+                            char value = *reinterpret_cast<const char *>(dataPtr + offset);
+                            oss << value;
+                            offset += 1;
+                        } else if (att.tpe == "STRING") {
+                            std::string value(dataPtr + offset, dataPtr + offset + att.size);
+                            oss << value;
+                            offset += att.size;  // Use the size from the schema
+                        } else {
+                            oss << "Unknown type";
+                        }
+
+                        spdlog::get("XDBC.SERVER")->info(oss.str());
+                    }*/
+                    //test
 
                     xdbcEnv->pts->push(
                             ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
@@ -247,11 +286,14 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
 
         // Handle remaining rows
         if (numRows > 0) {
-            spdlog::get("XDBC.SERVER")->info("PQ Deser thread {0} has {1} remaining tuples",
-                                             thr, numRows);
+            spdlog::get("XDBC.SERVER")->info("PQ Deser thread {0} has {1} remaining tuples", thr, numRows);
             Header head{};
             head.totalTuples = numRows;
             head.totalSize = head.totalTuples * xdbcEnv->tuple_size;
+            head.intermediateFormat = xdbcEnv->iformat;
+            if (xdbcEnv->iformat == 2)
+                head.totalSize = xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size;
+
             std::memcpy(bp[writeBuff].data(), &head, sizeof(Header));
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
 
@@ -307,6 +349,7 @@ int PQReader::readPQ(int thr) {
             parquetFile.seekg(0, std::ios::beg);
 
             Header head{};
+            head.intermediateFormat = 4;
             head.totalSize = fileSize;
             head.totalTuples = 0;
 
