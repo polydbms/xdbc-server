@@ -77,6 +77,7 @@ void Compressor::compress(int thr, const std::string &compName) {
             head.totalTuples = headIn->totalTuples;
             head.compressionType = compId;
             head.totalSize = totalSize;
+            head.uncompressedSize = headIn->totalSize;
             head.intermediateFormat = headIn->intermediateFormat;
             //head.crc = compute_crc(bp[bufferId].data(), totalSize);
             //head.attributeComp;

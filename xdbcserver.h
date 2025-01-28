@@ -21,6 +21,7 @@ struct Header {
     size_t totalSize;
     size_t totalTuples;
     size_t intermediateFormat;
+    size_t uncompressedSize;
     size_t crc;
     size_t attributeSize[MAX_ATTRIBUTES];
     size_t attributeComp[MAX_ATTRIBUTES];
