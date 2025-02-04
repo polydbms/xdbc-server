@@ -14,7 +14,6 @@ set(SNAPPY_LIBRARY_PATH "/usr/lib/x86_64-linux-gnu/libsnappy.so")
 
 
 set(LIBRARY_SOURCES
-    main.cpp
     xdbcserver.cpp
     Compression/Compressor.cpp
     DataSources/PGReader/PGReader.cpp
