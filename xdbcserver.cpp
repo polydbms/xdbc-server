@@ -10,6 +10,7 @@
 
 #include "Compression/Compressor.h"
 #include "DataSources/PGReader/PGReader.h"
+#include "DataSources/PGInternalReader/PGInternalReader.h"
 #include "DataSources/CHReader/CHReader.h"
 #include "DataSources/CSVReader/CSVReader.h"
 #include "spdlog/spdlog.h"
@@ -322,6 +323,8 @@ int XDBCServer::serve() {
 
     if (xdbcEnv->system == "postgres") {
         ds = std::make_unique<PGReader>(*xdbcEnv, tableName);
+    } else if (xdbcEnv->system == "psql") {
+        ds = std::make_unique<PGInternalReader>(*xdbcEnv, tableName);
     } else if (xdbcEnv->system == "clickhouse") {
         ds = std::make_unique<CHReader>(*xdbcEnv, tableName);
     } else if (xdbcEnv->system == "csv") {

@@ -17,6 +17,7 @@ set(LIBRARY_SOURCES
     xdbcserver.cpp
     Compression/Compressor.cpp
     DataSources/PGReader/PGReader.cpp
+    DataSources/PGInternalReader/PGInternalReader.cpp
     DataSources/CHReader/CHReader.cpp
     DataSources/CSVReader/CSVReader.cpp
     DataSources/DataSource.cpp
@@ -62,6 +63,40 @@ find_package(fmt 8.1.1 REQUIRED)
 find_package(FastPFOR REQUIRED)
 find_package(Snappy REQUIRED)
 find_package(PkgConfig REQUIRED)
+find_package(PostgreSQL REQUIRED)
+find_library(POSTGRES_SERVER_LIB
+   NAMES plpgsql.so postgres.so libpgport.a libpgcommon.a
+    PATHS
+    /usr/lib/postgresql/14/lib
+    /usr/lib/postgresql/14/lib/bitcode
+    NO_DEFAULT_PATH
+    REQUIRED 
+)
+find_library(PGCOMMON_LIB
+    NAMES pgcommon_shlib pgcommon
+    PATHS /usr/lib/postgresql/14/lib
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+
+find_library(PGPORT_LIB
+    NAMES pgport_shlib pgport
+    PATHS /usr/lib/postgresql/14/lib
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+
+find_library(PGFEUTILS_LIB
+    NAMES pgfeutils
+    PATHS /usr/lib/postgresql/14/lib
+    NO_DEFAULT_PATH
+    REQUIRED
+)
+include_directories(
+    /usr/include/postgresql/14/server
+    /usr/include/postgresql/14/internal
+)
+
 #pkg_check_modules(PGMAGICK REQUIRED pgmagick)
 #include_directories(${PGMAGICK_INCLUDE_DIRS})
 target_link_libraries(xdbcserver_lib
@@ -73,7 +108,6 @@ target_link_libraries(xdbcserver_lib
     lzo2 lz4 
     cityhash
     pqxx
-    pq
     fpzip
     ${FPZIP_LIBRARIES}
     fmt::fmt 
@@ -82,13 +116,38 @@ target_link_libraries(xdbcserver_lib
     spdlog::spdlog
     FastPFOR::FastPFOR
     Snappy::snappy
-   # ${PGMAGICK_LIBRARIES}
+    ${POSTGRES_SERVER_LIB}
+    ${PGPORT_LIB}
+    ${PGCOMMON_LIB}
+    ${PGFEUTILS_LIB}
+    pq
+    ${PostgreSQL_LIBRARIES}
+    # ${PGMAGICK_LIBRARIES}
 )
 target_include_directories(xdbcserver_lib
     PUBLIC
     ${Boost_INCLUDE_DIRS}
 )
-add_executable(${PROJECT_NAME} main.cpp xdbcserver.cpp Compression/Compressor.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/DataSource.cpp)
+add_executable(${PROJECT_NAME} main.cpp xdbcserver.cpp Compression/Compressor.cpp  DataSources/PGInternalReader/PGInternalReader.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/DataSource.cpp)
 #add_library(clickhouse-cpp SHARED IMPORTED)
 #set_property(TARGET clickhouse-cpp PROPERTY IMPORTED_LOCATION "/usr/local/lib/libclickhouse-cpp-lib.so")
-target_link_libraries(${PROJECT_NAME} PRIVATE clickhouse-cpp-lib -lpqxx -lpq ${USED_LIBS} lzo2 lz4 cityhash spdlog::spdlog ZLIB::ZLIB FastPFOR::FastPFOR ${FPZIP_LIBRARY})
+target_link_libraries(${PROJECT_NAME} 
+    PRIVATE 
+    xdbcserver_lib
+    clickhouse-cpp-lib 
+    -lpqxx -lpq 
+    ${USED_LIBS} 
+    lzo2 lz4 
+    cityhash 
+    spdlog::spdlog 
+    ZLIB::ZLIB 
+    FastPFOR::FastPFOR 
+    ${FPZIP_LIBRARY} 
+    ${POSTGRES_SERVER_LIB}
+    ${PGPORT_LIB}
+    ${PGCOMMON_LIB}
+    ${PGFEUTILS_LIB}
+    pq
+    ${PostgreSQL_LIBRARIES}
+)
+

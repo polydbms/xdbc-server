@@ -34,6 +34,7 @@ RUN git clone https://github.com/LLNL/fpzip.git && cd fpzip && \
     cmake --build . --config Release && \
     make install
 
+
 # install postgres dependencies
 
 RUN apt install -qy libpq-dev libpqxx-dev
@@ -61,6 +62,19 @@ RUN cd /clickhouse-cpp && \
     cmake .. -DWITH_SYSTEM_ABSEIL=ON -DCMAKE_POSITION_INDEPENDENT_CODE=ON -DBUILD_SHARED_LIBS=ON && \
     make -j8 && \
     make install
+
+# install postgres
+RUN apt update && apt install -y \
+    postgresql-14 \
+    postgresql-server-dev-14 \
+    postgresql-contrib \
+    libpq-dev \
+    && ldconfig
+
+# set PostgreSQL environment
+ENV POSTGRES_HOME=/usr/lib/postgresql/14
+ENV LD_LIBRARY_PATH=/usr/lib/postgresql/14/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
+ENV POSTGRES_LIBRARY=/usr/lib/x86_64-linux-gnu/libpq.so
 
 # copy and install xdbc server
 RUN mkdir /xdbc-server
