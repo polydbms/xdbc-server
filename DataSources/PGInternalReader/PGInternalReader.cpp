@@ -1,8 +1,8 @@
-#include "postgres.h"  // Must be first
-#include <cstdint>    // For standard integer types
+#include "postgres.h"  
+#include <cstdint>   
 #include "executor/spi.h"
+#include <catalog/pg_type.h>
 #include "utils/rel.h"
-#include "catalog/pg_type.h"
 #include "fmgr.h"
 #include "utils/memutils.h"
 #include "spdlog/spdlog.h"
@@ -25,7 +25,7 @@
 using namespace std;
 using namespace pqxx;
 using namespace boost::asio;
-undefined reference to `SPI_gettypeid(TupleDescData*, int)'
+//undefined reference to `SPI_gettypeid(TupleDescData*, int)'
 
 PG_MODULE_MAGIC;
 
@@ -47,27 +47,59 @@ bool PGInternalReader::getFinishedReading() const {
     return finishedReading;
 }
 
+
 int PGInternalReader::getMaxCtId(const std::string &tableName) {
+    /* get MaxCtId(table name)
+     * retruns :    select max(ctid) from tableName 
+     *              -1 if error
+     * */
+    int ret;
+    SPITupleTable *tuptable;
+    HeapTuple tuple;
+    char *maxCtIdStr;
+    // connect 
+    if ((ret = SPI_connect()) != SPI_OK_CONNECT) {
+        spdlog::get("XDBC.SERVER")->error("spi connection failed: error code %d", ret);
+        return -1; 
+    }
+    // run query
+    std::string qstr = "SELECT (MAX(ctid)::text::point)[0]::bigint AS maxctid FROM " + tableName;    
+    ret = SPI_execute(qstr.c_str(), true, 0); 
 
-    const char *conninfo;
-    PGconn *connection = NULL;
+    if (ret != SPI_OK_SELECT) {  
+        spdlog::get("XDBC.SERVER")->error("SPI_execute failed: error code %d", ret);
+        SPI_finish();
+        return -1;
+    }
+    // return result 
+    if (SPI_processed > 0 && (tuptable = SPI_tuptable) != NULL) {
+        TupleDesc tupdesc = tuptable->tupdesc;
+        tuple = tuptable->vals[0]; 
+        // read out value
+        maxCtIdStr = SPI_getvalue(tuple, tupdesc, 1); 
 
-    conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
-    connection = PQconnectdb(conninfo);
+        if (maxCtIdStr != NULL) {
+            try {
+                int maxCtId = stoi(maxCtIdStr);
+                SPI_finish();
+                return maxCtId;
+            } catch (const std::exception e) {
+                spdlog::get("XDBC.SERVER")->error("get maxctid failed: %s", e.what());
+                SPI_finish();
+                return -1; 
+            }        } else {
+            spdlog::get("XDBC.SERVER")->warn("maxctid is NULL");
+            SPI_finish();
+            return -1; 
+        }
 
-    PGresult *res;
-    std::string qStr = "SELECT (MAX(ctid)::text::point)[0]::bigint AS maxctid FROM " + tableName;
-    res = PQexec(connection, qStr.c_str());
-
-    int fnum = PQfnumber(res, "maxctid");
-
-    char *maxPtr = PQgetvalue(res, 0, fnum);
-
-    int maxCtId = stoi(maxPtr);
-
-    PQfinish(connection);
-    return maxCtId;
+    } else {
+        spdlog::get("XDBC.SERVER")->warn("No rows returned or tuptable is NULL");
+        SPI_finish();
+        return -1;
+    }
 }
+
 void PGInternalReader::readData() {
     auto start = std::chrono::steady_clock::now();
     int totalcnt = readDbData();
@@ -271,6 +303,10 @@ PGInternalReader::readPG(int thr) {
                     
                     // Handle different PostgreSQL types
                     switch(typeId) {
+                        case INT2OID:
+                            attSize = sizeof(int16);
+                            *(int16*)writePtr = DatumGetInt16(value);
+                            break;
                         case INT4OID:
                             attSize = sizeof(int32);
                             *(int32*)writePtr = DatumGetInt32(value);
@@ -287,9 +323,32 @@ PGInternalReader::readPG(int thr) {
                             attSize = sizeof(float8);
                             *(float8*)writePtr = DatumGetFloat8(value);
                             break;
-                        // Add other types as needed
+                        case BOOLOID:
+                            attSize = sizeof(bool);
+                            *(bool*)writePtr = DatumGetBool(value);
+                            break;
+                        case BPCHAROID:
+                            attSize = -1; 
+                            strcpy((char*)writePtr, DatumGetCString(value));
+                            break;
+                        case VARCHAROID: 
+                            attSize = -1; 
+                            strcpy((char*)writePtr, DatumGetCString(value));
+                            break;
+                        case TEXTOID:
+                            attSize = -1;
+                            strcpy((char*)writePtr, DatumGetCString(value));
+                            break;
+                        case UNKNOWNOID:
+                            attSize = -1;
+                            strcpy((char*)writePtr, DatumGetCString(value));
+                            break;
                     }
-                    
+                    /*
+                     * find more types using :
+                     * select oid, typename 
+                     * from pg_type;
+                     * */
                     writePtr += attSize;
                     sizeWritten += attSize;
                 }

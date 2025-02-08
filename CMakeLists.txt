@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.16)
 project(xdbc-server)
 
 set(CMAKE_CXX_STANDARD 17)
-set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -g")
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread -g -std=gnu++17")
 set(CMAKE_CXX_FLAGS_RELEASE "-O3")
 #[[SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pg")
 SET(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -pg")
@@ -57,97 +57,53 @@ ENDIF (Boost_FOUND)
 SET(USED_LIBS ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_PROGRAM_OPTIONS_LIBRARY} ${Boost_REGEX_LIBRARY} ${ZSTD_LIBRARY_PATH} ${SNAPPY_LIBRARY_PATH})
 
 #add_definitions(-DUSE_SYSTEM_ABSEIL=OFF)
-add_library(xdbcserver_lib SHARED ${LIBRARY_SOURCES})
 find_package(FPZIP REQUIRED)
 find_package(fmt 8.1.1 REQUIRED)
 find_package(FastPFOR REQUIRED)
 find_package(Snappy REQUIRED)
 find_package(PkgConfig REQUIRED)
 find_package(PostgreSQL REQUIRED)
-find_library(POSTGRES_SERVER_LIB
-   NAMES plpgsql.so postgres.so libpgport.a libpgcommon.a
-    PATHS
-    /usr/lib/postgresql/14/lib
-    /usr/lib/postgresql/14/lib/bitcode
-    NO_DEFAULT_PATH
-    REQUIRED 
-)
-find_library(PGCOMMON_LIB
-    NAMES pgcommon_shlib pgcommon
-    PATHS /usr/lib/postgresql/14/lib
-    NO_DEFAULT_PATH
-    REQUIRED
-)
 
-find_library(PGPORT_LIB
-    NAMES pgport_shlib pgport
-    PATHS /usr/lib/postgresql/14/lib
-    NO_DEFAULT_PATH
-    REQUIRED
-)
-
-find_library(PGFEUTILS_LIB
-    NAMES pgfeutils
-    PATHS /usr/lib/postgresql/14/lib
-    NO_DEFAULT_PATH
-    REQUIRED
-)
 include_directories(
+    ${CMAKE_SOURCE_DIR}/src
+    ${PostgreSQL_INCLUDE_DIRS}
     /usr/include/postgresql/14/server
-    /usr/include/postgresql/14/internal
 )
 
-#pkg_check_modules(PGMAGICK REQUIRED pgmagick)
-#include_directories(${PGMAGICK_INCLUDE_DIRS})
+add_library(xdbcserver_lib SHARED ${LIBRARY_SOURCES})
+
 target_link_libraries(xdbcserver_lib
     PRIVATE
     clickhouse-cpp-lib
     boost_program_options
     boost_system
-    -lpqxx -lpq
-    lzo2 lz4 
+    lzo2
+    lz4
     cityhash
     pqxx
     fpzip
     ${FPZIP_LIBRARIES}
-    fmt::fmt 
-    spdlog::spdlog 
-    ZLIB::ZLIB  
+    fmt::fmt
     spdlog::spdlog
+    ZLIB::ZLIB
     FastPFOR::FastPFOR
     Snappy::snappy
-    ${POSTGRES_SERVER_LIB}
-    ${PGPORT_LIB}
-    ${PGCOMMON_LIB}
-    ${PGFEUTILS_LIB}
-    pq
-    ${PostgreSQL_LIBRARIES}
-    # ${PGMAGICK_LIBRARIES}
+    ${PostgreSQL_LIBRARIES} 
 )
-target_include_directories(xdbcserver_lib
-    PUBLIC
-    ${Boost_INCLUDE_DIRS}
-)
-add_executable(${PROJECT_NAME} main.cpp xdbcserver.cpp Compression/Compressor.cpp  DataSources/PGInternalReader/PGInternalReader.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/DataSource.cpp)
-#add_library(clickhouse-cpp SHARED IMPORTED)
-#set_property(TARGET clickhouse-cpp PROPERTY IMPORTED_LOCATION "/usr/local/lib/libclickhouse-cpp-lib.so")
-target_link_libraries(${PROJECT_NAME} 
-    PRIVATE 
-    xdbcserver_lib
-    clickhouse-cpp-lib 
-    -lpqxx -lpq 
-    ${USED_LIBS} 
-    lzo2 lz4 
-    cityhash 
-    spdlog::spdlog 
-    ZLIB::ZLIB 
-    FastPFOR::FastPFOR 
-    ${FPZIP_LIBRARY} 
-    ${POSTGRES_SERVER_LIB}
-    ${PGPORT_LIB}
-    ${PGCOMMON_LIB}
-    ${PGFEUTILS_LIB}
-    pq
-    ${PostgreSQL_LIBRARIES}
-)
-
+# note : idk how to compile the executable with PGIntaernalReader. for the server probably PGInternal will never be relevant. so maybe instead of fixing this just remove PGInternalReader from the executable
+# Create executable
+#add_executable(${PROJECT_NAME} main.cpp xdbcserver.cpp Compression/Compressor.cpp  DataSources/PGInternalReader/PGInternalReader.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/DataSource.cpp)
+# Link executable
+#target_link_libraries(${PROJECT_NAME}
+#    PRIVATE
+#    clickhouse-cpp-lib
+#    ${USED_LIBS}
+#    lzo2
+#    lz4
+#    cityhash
+#    spdlog::spdlog
+#    ZLIB::ZLIB
+#    FastPFOR::FastPFOR
+#    ${FPZIP_LIBRARY}
+#    ${PostgreSQL_LIBRARIES} 
+#)

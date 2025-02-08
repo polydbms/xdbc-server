@@ -71,9 +71,14 @@ RUN apt update && apt install -y \
     libpq-dev \
     && ldconfig
 
+RUN echo "/usr/lib/postgresql/14/lib" | tee /etc/ld.so.conf.d/postgresql.conf && \
+    ldconfig
+RUN ls -la /usr/lib/postgresql/14/lib/
+RUN ldconfig
+
+
 # set PostgreSQL environment
 ENV POSTGRES_HOME=/usr/lib/postgresql/14
-ENV LD_LIBRARY_PATH=/usr/lib/postgresql/14/lib:/usr/lib/x86_64-linux-gnu:${LD_LIBRARY_PATH:-}
 ENV POSTGRES_LIBRARY=/usr/lib/x86_64-linux-gnu/libpq.so
 
 # copy and install xdbc server
