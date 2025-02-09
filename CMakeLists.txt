@@ -71,9 +71,22 @@ include_directories(
 )
 
 add_library(xdbcserver_lib SHARED ${LIBRARY_SOURCES})
+execute_process(
+    COMMAND pg_config --libdir
+    OUTPUT_VARIABLE PG_LIB_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
 
+message(STATUS "PostgreSQL Library Directory: ${PG_LIB_DIR}")
+find_library(POSTGRES_SERVER_LIB
+    NAMES pq
+    PATHS ${PG_LIB_DIR}
+    NO_DEFAULT_PATH
+    REQUIRED
+)
 target_link_libraries(xdbcserver_lib
-    PRIVATE
+    ${PostgreSQL_LIBRARIES}
+    ${POSTGRES_SERVER_LIB}
     clickhouse-cpp-lib
     boost_program_options
     boost_system
@@ -88,8 +101,8 @@ target_link_libraries(xdbcserver_lib
     ZLIB::ZLIB
     FastPFOR::FastPFOR
     Snappy::snappy
-    ${PostgreSQL_LIBRARIES} 
 )
+
 # note : idk how to compile the executable with PGIntaernalReader. for the server probably PGInternal will never be relevant. so maybe instead of fixing this just remove PGInternalReader from the executable
 # Create executable
 #add_executable(${PROJECT_NAME} main.cpp xdbcserver.cpp Compression/Compressor.cpp  DataSources/PGInternalReader/PGInternalReader.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/DataSource.cpp)

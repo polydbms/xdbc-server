@@ -1,14 +1,14 @@
-#include "postgres.h"  
-#include <cstdint>   
+extern "C" {
+#include "postgres.h"
 #include "executor/spi.h"
 #include <catalog/pg_type.h>
 #include "utils/rel.h"
 #include "fmgr.h"
 #include "utils/memutils.h"
+}
 #include "spdlog/spdlog.h"
 
 #include "PGInternalReader.h"
-#include "/usr/include/postgresql/libpq-fe.h"
 #include "../fast_float.h"
 #include "../deserializers.h"
 #include "../../xdbcserver.h"
@@ -25,26 +25,21 @@
 using namespace std;
 using namespace pqxx;
 using namespace boost::asio;
-//undefined reference to `SPI_gettypeid(TupleDescData*, int)'
 
+extern "C" {
 PG_MODULE_MAGIC;
-
-PGInternalReader::PGInternalReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
-        DataSource(xdbcEnv, tableName),
-        bp(*xdbcEnv.bpPtr),
-        totalReadBuffers(0),
-        finishedReading(false),
-        xdbcEnv(&xdbcEnv) {
-
-    spdlog::get("XDBC.SERVER")->info("pg constructor called with table {0}", tableName);
-}
-
-int PGInternalReader::getTotalReadBuffers() const {
-    return totalReadBuffers;
-}
-
-bool PGInternalReader::getFinishedReading() const {
-    return finishedReading;
+bool hasSPIConnect(){
+    bool ret = false;
+    int val;
+    try{
+        if((val=SPI_connect()) == SPI_OK_CONNECT){
+            ret = true;
+            SPI_finish();
+        }
+    } catch(...) {
+        return false;
+    }
+    return ret;
 }
 
 
@@ -63,8 +58,8 @@ int PGInternalReader::getMaxCtId(const std::string &tableName) {
         return -1; 
     }
     // run query
-    std::string qstr = "SELECT (MAX(ctid)::text::point)[0]::bigint AS maxctid FROM " + tableName;    
-    ret = SPI_execute(qstr.c_str(), true, 0); 
+    std::string qStr = "SELECT (MAX(ctid)::text::point)[0]::bigint AS maxctid FROM " + tableName;    
+    ret = SPI_execute(qStr.c_str(), true, 0); 
 
     if (ret != SPI_OK_SELECT) {  
         spdlog::get("XDBC.SERVER")->error("SPI_execute failed: error code %d", ret);
@@ -100,114 +95,6 @@ int PGInternalReader::getMaxCtId(const std::string &tableName) {
     }
 }
 
-void PGInternalReader::readData() {
-    auto start = std::chrono::steady_clock::now();
-    int totalcnt = readDbData();
-        
-    auto end = std::chrono::steady_clock::now();
-    spdlog::get("XDBC.SERVER")->info("read  | elapsed time: {0} ms for #tuples: {1}",
-                                     std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(),
-                                     totalcnt);
-}
-
-int PGInternalReader::readDbData() {
-    auto start_read = std::chrono::steady_clock::now();
-
-    spdlog::get("XDBC.SERVER")->info("using spi connect to read pg data, parallelism: {0}", xdbcEnv->read_parallelism);
-
-
-
-    int threadWrittenTuples[xdbcEnv->deser_parallelism];
-    int threadWrittenBuffers[xdbcEnv->deser_parallelism];
-    thread readThreads[xdbcEnv->read_parallelism];
-    thread deSerThreads[xdbcEnv->deser_parallelism];
-
-    // TODO: throw something when table does not exist
-
-    int maxRowNum = getMaxCtId(tableName);
-
-    int partNum = xdbcEnv->read_parallelism;
-    div_t partSizeDiv = div(maxRowNum, partNum);
-
-    int partSize = partSizeDiv.quot;
-
-    if (partSizeDiv.rem > 0)
-        partSize++;
-
-    int readQ = 0;
-    for (int i = partNum - 1; i >= 0; i--) {
-        Part p{};
-        p.id = i;
-        p.startOff = i * partSize;
-        p.endOff = ((i + 1) * partSize);
-
-        if (i == partNum - 1)
-            p.endOff = UINT32_MAX;
-
-        xdbcEnv->partPtr[readQ]->push(p);
-
-        spdlog::get("XDBC.SERVER")->info("Partition {0} [{1},{2}] assigned to read thread {3} ",
-                                         p.id, p.startOff, p.endOff, readQ);
-
-        readQ++;
-        if (readQ == xdbcEnv->read_parallelism)
-            readQ = 0;
-
-
-    }
-
-    //final partition
-    Part fP{};
-    fP.id = -1;
-
-    xdbcEnv->activeReadThreads.resize(xdbcEnv->read_parallelism);
-    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
-        xdbcEnv->partPtr[i]->push(fP);
-        readThreads[i] = std::thread(&PGInternalReader::readPG, this, i);
-        xdbcEnv->activeReadThreads[i] = true;
-
-    }
-
-
-    auto start_deser = std::chrono::steady_clock::now();
-    for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
-        threadWrittenTuples[i] = 0;
-        threadWrittenBuffers[i] = 0;
-
-        deSerThreads[i] = std::thread(&PGInternalReader::deserializePG,
-                                      this, i,
-                                      std::ref(threadWrittenTuples[i]), std::ref(threadWrittenBuffers[i])
-        );
-
-    }
-
-    int totalTuples = 0;
-    int totalBuffers = 0;
-    for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
-        deSerThreads[i].join();
-        totalTuples += threadWrittenTuples[i];
-        totalBuffers += threadWrittenBuffers[i];
-    }
-
-
-    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
-        readThreads[i].join();
-    }
-
-    finishedReading.store(true);
-
-    auto end = std::chrono::steady_clock::now();
-    auto total_read_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start_read).count();
-    auto total_deser_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start_deser).count();
-
-
-    spdlog::get("XDBC.SERVER")->info("Read+Deser | Elapsed time: {0} ms for #tuples: {1}, #buffers: {2}",
-                                     total_deser_time / 1000,
-                                     totalTuples, totalBuffers);
-
-    return totalTuples;
-}
-
 int 
 PGInternalReader::readPG(int thr) {
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "start"});
@@ -215,7 +102,7 @@ PGInternalReader::readPG(int thr) {
     int curBid = xdbcEnv->readBufferPtr[thr]->pop();
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
 
-    Part curpart = xdbcEnv->partPtr[thr]->pop();
+    Part curPart = xdbcEnv->partPtr[thr]->pop();
 
     std::byte *writePtr = bp[curBid].data() + sizeof(Header);
     int deserQ = 0;
@@ -231,7 +118,7 @@ PGInternalReader::readPG(int thr) {
         spdlog::get("XDBC.SERVER")->error("spi connection failed: error code %d", ret);
     }
     
-    while (curpart.id != -1) {
+    while (curPart.id != -1) {
 
         char *receiveBuffer = nullptr; 
 
@@ -243,10 +130,14 @@ PGInternalReader::readPG(int thr) {
         SPITupleTable *tuptable;
         HeapTuple tuple; 
         // modify to support more complex requests ?
-        std::string qstr = "select " + getAttributesAsStr(xdbcEnv->schema) + " from " + tableName;
+        std::string qStr =
+                "COPY (SELECT " + getAttributesAsStr(xdbcEnv->schema) + " FROM " + tableName +
+                " WHERE ctid BETWEEN '(" +
+                std::to_string(curPart.startOff) + ",0)'::tid AND '(" +
+                std::to_string(curPart.endOff) + ",0)'::tid) TO STDOUT WITH (FORMAT text, DELIMITER '|')";
         
-        // execute query
-        ret = SPI_execute(qstr.c_str(), true, 0);
+       // execute query
+        ret = SPI_execute(qStr.c_str(), true, 0);
 
         if (ret != SPI_OK_SELECT) {
             SPI_finish();
@@ -257,7 +148,7 @@ PGInternalReader::readPG(int thr) {
             
         tupdesc = SPI_tuptable->tupdesc;
         tuptable = SPI_tuptable;
-        curpart = xdbcEnv->partPtr[thr]->pop();
+        curPart = xdbcEnv->partPtr[thr]->pop();
 
         while (rows - i > 0) {
             tuplesRead++;
@@ -369,7 +260,8 @@ PGInternalReader::readPG(int thr) {
 
         spdlog::get("XDBC.SERVER")->info("PG read thread {0} finished reading", thr);
 
-        SPI_freetuptable(SPI_tuptable);
+        //SPI_freetuptable(SPI_tuptable);
+        // d
     }
     SPI_finish();
 
@@ -414,6 +306,133 @@ PGInternalReader::readPG(int thr) {
     return 1;
 }
 
+}
+
+PGInternalReader::PGInternalReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
+        DataSource(xdbcEnv, tableName),
+        bp(*xdbcEnv.bpPtr),
+        totalReadBuffers(0),
+        finishedReading(false),
+        xdbcEnv(&xdbcEnv) {
+
+    spdlog::get("XDBC.SERVER")->info("pg constructor called with table {0}", tableName);
+}
+
+int PGInternalReader::getTotalReadBuffers() const {
+    return totalReadBuffers;
+}
+
+bool PGInternalReader::getFinishedReading() const {
+    return finishedReading;
+}
+
+void PGInternalReader::readData() {
+    auto start = std::chrono::steady_clock::now();
+    int totalcnt = readDbData();
+        
+    auto end = std::chrono::steady_clock::now();
+    spdlog::get("XDBC.SERVER")->info("read  | elapsed time: {0} ms for #tuples: {1}",
+                                     std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count(),
+                                     totalcnt);
+}
+
+int PGInternalReader::readDbData() {
+    auto start_read = std::chrono::steady_clock::now();
+
+    spdlog::get("XDBC.SERVER")->info("using spi connect to read pg data, parallelism: {0}", xdbcEnv->read_parallelism);
+
+
+
+    int threadWrittenTuples[xdbcEnv->deser_parallelism];
+    int threadWrittenBuffers[xdbcEnv->deser_parallelism];
+    thread readThreads[xdbcEnv->read_parallelism];
+    thread deSerThreads[xdbcEnv->deser_parallelism];
+
+    // TODO: throw something when table does not exist
+
+    int maxRowNum = getMaxCtId(tableName);
+
+    int partNum = xdbcEnv->read_parallelism;
+    div_t partSizeDiv = div(maxRowNum, partNum);
+
+    int partSize = partSizeDiv.quot;
+
+    if (partSizeDiv.rem > 0)
+        partSize++;
+
+    int readQ = 0;
+    for (int i = partNum - 1; i >= 0; i--) {
+        Part p{};
+        p.id = i;
+        p.startOff = i * partSize;
+        p.endOff = ((i + 1) * partSize);
+
+        if (i == partNum - 1)
+            p.endOff = UINT32_MAX;
+
+        xdbcEnv->partPtr[readQ]->push(p);
+
+        spdlog::get("XDBC.SERVER")->info("Partition {0} [{1},{2}] assigned to read thread {3} ",
+                                         p.id, p.startOff, p.endOff, readQ);
+
+        readQ++;
+        if (readQ == xdbcEnv->read_parallelism)
+            readQ = 0;
+
+
+    }
+
+    //final partition
+    Part fP{};
+    fP.id = -1;
+
+    xdbcEnv->activeReadThreads.resize(xdbcEnv->read_parallelism);
+    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
+        xdbcEnv->partPtr[i]->push(fP);
+        readThreads[i] = std::thread(&PGInternalReader::readPG, this, i);
+        xdbcEnv->activeReadThreads[i] = true;
+
+    }
+
+
+    auto start_deser = std::chrono::steady_clock::now();
+    for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
+        threadWrittenTuples[i] = 0;
+        threadWrittenBuffers[i] = 0;
+
+        deSerThreads[i] = std::thread(&PGInternalReader::deserializePG,
+                                      this, i,
+                                      std::ref(threadWrittenTuples[i]), std::ref(threadWrittenBuffers[i])
+        );
+
+    }
+
+    int totalTuples = 0;
+    int totalBuffers = 0;
+    for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
+        deSerThreads[i].join();
+        totalTuples += threadWrittenTuples[i];
+        totalBuffers += threadWrittenBuffers[i];
+    }
+
+
+    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
+        readThreads[i].join();
+    }
+
+    finishedReading.store(true);
+
+    auto end = std::chrono::steady_clock::now();
+    auto total_read_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start_read).count();
+    auto total_deser_time = std::chrono::duration_cast<std::chrono::microseconds>(end - start_deser).count();
+
+
+    spdlog::get("XDBC.SERVER")->info("Read+Deser | Elapsed time: {0} ms for #tuples: {1}, #buffers: {2}",
+                                     total_deser_time / 1000,
+                                     totalTuples, totalBuffers);
+
+    return totalTuples;
+}
 
 int
 PGInternalReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers) {
@@ -611,5 +630,4 @@ PGInternalReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &tot
 
     return 1;
 }
-
 

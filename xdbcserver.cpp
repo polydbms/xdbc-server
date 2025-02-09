@@ -50,7 +50,6 @@ string read_(tcp::socket &socket) {
     return data;
 }
 
-
 XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
         : bp(),
           xdbcEnv(&xdbcEnv),
@@ -320,11 +319,13 @@ int XDBCServer::serve() {
     std::vector<thread> comp_threads(xdbcEnv->compression_parallelism);
     std::thread t1;
     std::unique_ptr<DataSource> ds;
-
-    if (xdbcEnv->system == "postgres") {
-        ds = std::make_unique<PGReader>(*xdbcEnv, tableName);
-    } else if (xdbcEnv->system == "psql") {
-        ds = std::make_unique<PGInternalReader>(*xdbcEnv, tableName);
+    //if (xdbcEnv->system == "postgres") {
+    if (true) {
+        if (hasSPIConnect()){
+           ds = std::make_unique<PGInternalReader>(*xdbcEnv, tableName);
+        } else {
+            ds = std::make_unique<PGReader>(*xdbcEnv, tableName);
+        }
     } else if (xdbcEnv->system == "clickhouse") {
         ds = std::make_unique<CHReader>(*xdbcEnv, tableName);
     } else if (xdbcEnv->system == "csv") {

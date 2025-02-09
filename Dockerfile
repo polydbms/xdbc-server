@@ -76,6 +76,9 @@ RUN echo "/usr/lib/postgresql/14/lib" | tee /etc/ld.so.conf.d/postgresql.conf &&
 RUN ls -la /usr/lib/postgresql/14/lib/
 RUN ldconfig
 
+RUN apt-get update && \
+    apt-get install libreadline-dev
+
 
 # set PostgreSQL environment
 ENV POSTGRES_HOME=/usr/lib/postgresql/14

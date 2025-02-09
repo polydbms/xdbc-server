@@ -17,11 +17,9 @@ public:
     PGInternalReader(RuntimeEnv &xdbcEnv, const std::string &tableName);
 
     int getTotalReadBuffers() const override;
-
     bool getFinishedReading() const override;
 
     void readData() override;
-
 private:
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;
@@ -33,5 +31,5 @@ private:
     int deserializePG(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
     int getMaxCtId(const std::string &tableName);
 };
-
+extern "C" bool hasSPIConnect(); 
 #endif // PG_READER_H
