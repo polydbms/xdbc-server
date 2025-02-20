@@ -37,6 +37,12 @@ typedef std::shared_ptr<customQueue<int>> FBQ_ptr;
 typedef std::shared_ptr<customQueue<Part>> FPQ_ptr;
 typedef std::shared_ptr<customQueue<ProfilingTimestamps>> PTQ_ptr;
 
+struct transfer_details
+{
+    float elapsed_time = 0.0f; // Default value for elapsed_time
+    int bufProcessed = 5199;   //
+};
+
 struct RuntimeEnv
 {
     long transfer_id;
@@ -76,6 +82,7 @@ struct RuntimeEnv
 
     int spawn_source;
     std::atomic<int> stop_updation;
+    transfer_details tf_paras;
     PTQ_ptr pts;
 };
 

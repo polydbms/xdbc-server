@@ -58,7 +58,7 @@ ENDIF (Boost_FOUND)
 SET(USED_LIBS ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_PROGRAM_OPTIONS_LIBRARY} ${Boost_REGEX_LIBRARY} ${ZSTD_LIBRARY_PATH} ${SNAPPY_LIBRARY_PATH})
 
 #add_definitions(-DUSE_SYSTEM_ABSEIL=OFF)
-add_executable(${PROJECT_NAME} main.cpp xdbcserver.cpp Compression/Compressor.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/PQReader/PQReader.cpp DataSources/DataSource.cpp)
+add_executable(${PROJECT_NAME} main.cpp xdbcserver.cpp ControllerInterface/WebSocketClient.cpp Compression/Compressor.cpp DataSources/PGReader/PGReader.cpp DataSources/CHReader/CHReader.cpp DataSources/CSVReader/CSVReader.cpp DataSources/PQReader/PQReader.cpp DataSources/DataSource.cpp)
 #add_library(clickhouse-cpp SHARED IMPORTED)
 #set_property(TARGET clickhouse-cpp PROPERTY IMPORTED_LOCATION "/usr/local/lib/libclickhouse-cpp-lib.so")
 target_link_libraries(${PROJECT_NAME} PRIVATE clickhouse-cpp-lib -lpqxx -lpq ${USED_LIBS} lzo2 lz4 cityhash spdlog::spdlog ZLIB::ZLIB FastPFOR::FastPFOR ${FPZIP_LIBRARY} ${ARROW_LIBRARIES} -larrow ${PARQUET_SHARED_LIB})

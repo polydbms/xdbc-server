@@ -163,6 +163,14 @@ nlohmann::json metrics_convert(RuntimeEnv &env)
     return metrics_json;
 }
 
+nlohmann::json additional_msg(RuntimeEnv &env)
+{
+    nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
+    metrics_json["totalTime_ms"] = env.tf_paras.elapsed_time;
+    metrics_json["bufTotal"] = env.tf_paras.bufProcessed;
+    return metrics_json;
+}
+
 void env_convert(RuntimeEnv &env, const nlohmann::json &env_json)
 {
     try
@@ -231,7 +239,7 @@ int main(int argc, char *argv[])
         ws_client.start();
         io_thread = std::thread([&]()
                                 { ws_client.run(
-                                      std::bind(&metrics_convert, std::ref(xdbcEnv)),
+                                      std::bind(&metrics_convert, std::ref(xdbcEnv)), std::bind(&additional_msg, std::ref(xdbcEnv)),
                                       std::bind(&env_convert, std::ref(xdbcEnv), std::placeholders::_1)); });
         while (!ws_client.is_active())
         {
