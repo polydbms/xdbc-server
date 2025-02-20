@@ -1,0 +1,46 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Run Test in XDBC Client",
+			"type": "cppdbg",
+			"request": "launch",
+			"program": "/xdbc-client/Sinks/build/xdbcsinks",
+			"args": [
+				"--server-host=xdbcserver",
+				"--table",
+				"ss13husallm",
+				"-f1",
+				"-b",
+				"1024",
+				"-p",
+				"32000",
+				"-n1",
+				"-w1",
+				"-d2",
+				"-s8",
+				"--skip-serializer=0",
+				"--target=csv"
+			],
+			"stopAtEntry": false,
+			"cwd": "/xdbc-client/build/tests",
+			"environment": [],
+			"externalConsole": false,
+			"MIMode": "gdb",
+			"miDebuggerPath": "/usr/bin/gdb",
+			"setupCommands": [
+				{
+					"description": "Enable pretty-printing for gdb",
+					"text": "-enable-pretty-printing",
+					"ignoreFailures": true
+				},
+				{
+					"description": "Automatically get a backtrace on crash",
+					"text": "define hook-stop\nbt\nend",
+					"ignoreFailures": true
+				}
+			],
+			"internalConsoleOptions": "openOnSessionStart"
+		}
+	]
+}
