@@ -40,7 +40,6 @@ typedef std::shared_ptr<customQueue<ProfilingTimestamps>> PTQ_ptr;
 struct transfer_details
 {
     float elapsed_time = 0.0f; // Default value for elapsed_time
-    int bufProcessed = 5199;   //
 };
 
 struct RuntimeEnv
@@ -81,7 +80,7 @@ struct RuntimeEnv
     int profilingInterval;
 
     int spawn_source;
-    std::atomic<int> stop_updation;
+    std::atomic<int> enable_updation;
     transfer_details tf_paras;
     PTQ_ptr pts;
 };

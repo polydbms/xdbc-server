@@ -139,7 +139,7 @@ nlohmann::json metrics_convert(RuntimeEnv &env)
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     // auto env_pts = env->pts->copyAll();
 
-    if ((env.stop_updation == 0) && (env.pts))
+    if ((env.pts))
     {
         std::vector<ProfilingTimestamps> env_pts;
         env_pts = env.pts->copy_newElements();
@@ -167,7 +167,6 @@ nlohmann::json additional_msg(RuntimeEnv &env)
 {
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     metrics_json["totalTime_ms"] = env.tf_paras.elapsed_time;
-    metrics_json["bufTotal"] = env.tf_paras.bufProcessed;
     return metrics_json;
 }
 
@@ -194,7 +193,7 @@ void env_convert(RuntimeEnv &env, const nlohmann::json &env_json)
         env_.network_parallelism = std::stoi(env_json.at("netParallelism").get<std::string>());
         env_.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
 
-        if (env.stop_updation == 0)
+        if (env.enable_updation == 1)
         {
 
             // Lock the mutex to ensure exclusive access to env_
@@ -231,7 +230,7 @@ int main(int argc, char *argv[])
     handleCMDParams(argc, argv, xdbcEnv);
 
     // ***Setup websocket interface for controller***
-    xdbcEnv.stop_updation = 0;
+    xdbcEnv.enable_updation = 1;
     std::thread io_thread;
     WebSocketClient ws_client("xdbc-controller", "8003");
     if (xdbcEnv.spawn_source == 1)
