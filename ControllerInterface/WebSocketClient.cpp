@@ -3,12 +3,11 @@
 #include <thread>
 
 WebSocketClient::WebSocketClient(const std::string &host, const std::string &port)
-    : host_(host), port_(port), resolver_(ioc_), ws_(ioc_), timer_(ioc_), active_(false), stop_thread_(false), operation_started_(false) {}
+        : host_(host), port_(port), resolver_(ioc_), ws_(ioc_), timer_(ioc_), active_(false), stop_thread_(false),
+          operation_started_(false) {}
 
-void WebSocketClient::start()
-{
-    try
-    {
+void WebSocketClient::start() {
+    try {
         // Resolve host and port
         auto results = resolver_.resolve(host_, port_);
         // Connect to the first resolved endpoint
@@ -27,70 +26,58 @@ void WebSocketClient::start()
         auto start_time = std::chrono::steady_clock::now();
         const std::chrono::seconds timeout(10); // Set a timeout duration
 
-        while (!acknowledged)
-        {
+        while (!acknowledged) {
             // Check for timeout
             auto elapsed = std::chrono::steady_clock::now() - start_time;
-            if (elapsed > timeout)
-            {
+            if (elapsed > timeout) {
                 spdlog::error("Timeout waiting for server acknowledgment.");
                 throw std::runtime_error("Server acknowledgment timeout");
             }
 
             // Attempt to read the acknowledgment
-            try
-            {
+            try {
                 ws_.read(buffer);
                 std::string ack_response = beast::buffers_to_string(buffer.data());
                 spdlog::info("Received acknowledgment: {}", ack_response);
 
                 // Parse and check acknowledgment
                 json ack_json = json::parse(ack_response);
-                if (ack_json["operation"] == "acknowledged")
-                {
+                if (ack_json["operation"] == "acknowledged") {
                     acknowledged = true;
                     operation_started_ = true; // Set flag indicating acknowledgment received
                     spdlog::info("Server acknowledged the start request.");
-                }
-                else
-                {
+                } else {
                     spdlog::warn("Server response does not acknowledge start: {}", ack_json.dump());
                     // throw std::runtime_error("Server rejected start request");
                 }
             }
-            catch (const std::exception &e)
-            {
+            catch (const std::exception &e) {
                 spdlog::error("Error while waiting for acknowledgment: {}", e.what());
                 // Optional: Retry after a short delay
                 std::this_thread::sleep_for(std::chrono::milliseconds(500));
             }
         }
     }
-    catch (const std::exception &e)
-    {
+    catch (const std::exception &e) {
         spdlog::error("WebSocket Client Error during start: {}", e.what());
         throw; // Rethrow the exception to notify the caller
     }
 }
 
-void WebSocketClient::periodic_communication()
-{
-    try
-    {
-        while (!stop_thread_)
-        {
+void WebSocketClient::periodic_communication() {
+    try {
+        while (!stop_thread_) {
             // Convert metrics to JSON and send it
             json metrics_json = metrics_convert_();
             json addtnl_info = additional_msg_();
             json combined_payload = metrics_json;
-            for (auto &[key, value] : addtnl_info.items())
-            {
+            for (auto &[key, value]: addtnl_info.items()) {
                 combined_payload[key] = value;
             }
             // json metrics_json = {{"waiting_time", "100ms"}};
             json request_json = {
-                {"operation", "get_environment"},
-                {"payload", combined_payload} // Include metrics in the payload
+                    {"operation", "get_environment"},
+                    {"payload",   combined_payload} // Include metrics in the payload
             };
             ws_.write(asio::buffer(request_json.dump()));
 
@@ -102,13 +89,10 @@ void WebSocketClient::periodic_communication()
 
             // Parse and process the response
             json env_json = json::parse(env_response);
-            if (env_json["operation"] == "set_environment")
-            {
+            if (env_json["operation"] == "set_environment") {
                 json payload = env_json["payload"];
                 env_convert_(payload); // Process environment data from payload
-            }
-            else
-            {
+            } else {
                 spdlog::warn("Unexpected operation received: {}", env_json["operation"]);
             }
 
@@ -117,20 +101,16 @@ void WebSocketClient::periodic_communication()
             active_ = true;
         }
     }
-    catch (const std::exception &e)
-    {
+    catch (const std::exception &e) {
         std::cerr << "Error in periodic communication: " << e.what() << std::endl;
     }
 }
 
 void WebSocketClient::run(std::function<json()> metrics_convert, std::function<json()> additional_msg,
-                          std::function<void(const json &)> env_convert)
-{
-    try
-    {
+                          std::function<void(const json &)> env_convert) {
+    try {
         // Wait until the operation has started and acknowledgment is received
-        while (!operation_started_)
-        {
+        while (!operation_started_) {
             std::this_thread::sleep_for(std::chrono::milliseconds(100)); // Wait briefly before checking again
         }
 
@@ -144,25 +124,21 @@ void WebSocketClient::run(std::function<json()> metrics_convert, std::function<j
 
         ioc_.run(); // Start processing asynchronous operations
     }
-    catch (const std::exception &e)
-    {
+    catch (const std::exception &e) {
         std::cerr << "Error in io_context run: " << e.what() << std::endl;
     }
 }
 
-void WebSocketClient::stop()
-{
+void WebSocketClient::stop() {
     stop_thread_ = true; // Signal thread to stop
 
-    try
-    {
-        if (ws_.is_open())
-        {
+    try {
+        if (ws_.is_open()) {
             // Send the "finished" message to the server
             json stop_payload = additional_msg_();
             json stop_message = {
-                {"operation", "transfer_finished"},
-                {"payload", stop_payload} // Include metrics in the payload
+                    {"operation", "transfer_finished"},
+                    {"payload",   stop_payload} // Include metrics in the payload
             };
             ws_.write(asio::buffer(stop_message.dump()));
             spdlog::info("Sent stop message: {}", stop_message.dump());
@@ -172,14 +148,12 @@ void WebSocketClient::stop()
         }
         ioc_.stop(); // Stop the io_context loop
     }
-    catch (const std::exception &e)
-    {
+    catch (const std::exception &e) {
         std::cerr << "Error during stop: " << e.what() << std::endl;
     }
 }
 
 // Check if the WebSocket client is active
-bool WebSocketClient::is_active() const
-{
+bool WebSocketClient::is_active() const {
     return active_.load();
 }

@@ -10,8 +10,7 @@
 #include <cmath>
 
 // Define the Metrics struct
-struct Metrics
-{
+struct Metrics {
     double waiting_time_ms;
     double processing_time_ms;
     double overall_time_ms;
@@ -25,11 +24,9 @@ struct Metrics
 };
 
 // Helper function to calculate standard deviation
-double calculate_stddev(const std::vector<double> &values, double mean)
-{
+double calculate_stddev(const std::vector<double> &values, double mean) {
     double sum = 0.0;
-    for (const auto &value : values)
-    {
+    for (const auto &value: values) {
         sum += (value - mean) * (value - mean);
     }
     return std::sqrt(sum / values.size());
@@ -37,27 +34,23 @@ double calculate_stddev(const std::vector<double> &values, double mean)
 
 // Function to calculate metrics per component and then aggregate them
 std::unordered_map<std::string, Metrics>
-calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buffer_size_kb)
-{
+calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buffer_size_kb) {
     size_t buffer_size_bytes = buffer_size_kb * 1024; // Convert buffer size to bytes
     std::unordered_map<std::string, std::unordered_map<int, std::vector<ProfilingTimestamps>>> events_per_component_thread;
 
     // Group timestamps by component and thread
-    for (const auto &ts : timestamps)
-    {
+    for (const auto &ts: timestamps) {
         events_per_component_thread[ts.component][ts.thread].push_back(ts);
     }
 
     std::unordered_map<std::string, Metrics> component_metrics;
 
     // Calculate metrics per component
-    for (const auto &[component, events_per_thread] : events_per_component_thread)
-    {
+    for (const auto &[component, events_per_thread]: events_per_component_thread) {
         std::vector<Metrics> thread_metrics;
         size_t total_buffers_processed = 0;
 
-        for (const auto &[thread_id, events] : events_per_thread)
-        {
+        for (const auto &[thread_id, events]: events_per_thread) {
             Metrics metrics = {0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0};
 
             std::chrono::high_resolution_clock::time_point start_time, push_time, pop_time, end_time;
@@ -72,42 +65,29 @@ calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buf
             const auto &first_element = events.front(); // Store the first event in the loop
             const auto &last_element = events.back();   // Store the last event in the loop
 
-            for (const auto &event : events)
-            {
-                if (event.event == "start")
-                {
+            for (const auto &event: events) {
+                if (event.event == "start") {
                     start_time = event.timestamp;
                     has_start_time = true;
-                }
-                else if (event.event == "pop")
-                {
+                } else if (event.event == "pop") {
                     pop_time = event.timestamp;
-                    if (has_push_time)
-                    {
+                    if (has_push_time) {
                         waiting_time += pop_time - push_time; // Waiting time is pop_time - previous push_time
-                    }
-                    else if (has_start_time)
-                    {
+                    } else if (has_start_time) {
                         waiting_time += pop_time - start_time; // Initial waiting time is pop_time - start_time
                     }
                     has_pop_time = true;
-                }
-                else if (event.event == "push")
-                {
+                } else if (event.event == "push") {
                     push_time = event.timestamp;
                     has_push_time = true;
-                    if (has_pop_time)
-                    {
+                    if (has_pop_time) {
                         processing_time += push_time - pop_time; // Processing time is push_time - pop_time
                         thread_buffers_processed++;
                     }
-                }
-                else if (event.event == "end")
-                {
+                } else if (event.event == "end") {
                     end_time = event.timestamp;
                     has_end_time = true;
-                    if (has_pop_time)
-                    {
+                    if (has_pop_time) {
                         processing_time += end_time - push_time; // Finalize the processing time
                     }
                 }
@@ -115,32 +95,27 @@ calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buf
 
             metrics.waiting_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(waiting_time).count();
             metrics.processing_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(processing_time).count();
-            if (has_end_time && has_start_time)
-            {
+            if (has_end_time && has_start_time) {
                 metrics.overall_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                              std::chrono::duration<double>(end_time - start_time))
-                                              .count();
-            }
-            else
-            {
+                        std::chrono::duration<double>(end_time - start_time))
+                        .count();
+            } else {
                 metrics.overall_time_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                              std::chrono::duration<double>(last_element.timestamp - first_element.timestamp))
-                                              .count();
+                        std::chrono::duration<double>(last_element.timestamp - first_element.timestamp))
+                        .count();
             }
             total_buffers_processed += thread_buffers_processed;
 
             // Calculate the total throughput in bytes per second for this thread
-            if (metrics.overall_time_ms > 0)
-            {
+            if (metrics.overall_time_ms > 0) {
                 metrics.total_throughput =
-                    (thread_buffers_processed * buffer_size_bytes) / (metrics.overall_time_ms / 1000.0);
+                        (thread_buffers_processed * buffer_size_bytes) / (metrics.overall_time_ms / 1000.0);
             }
 
             // Calculate the per buffer throughput in bytes per second for this thread
-            if (metrics.processing_time_ms > 0)
-            {
+            if (metrics.processing_time_ms > 0) {
                 metrics.per_buffer_throughput =
-                    (thread_buffers_processed * buffer_size_bytes) / (metrics.processing_time_ms / 1000.0);
+                        (thread_buffers_processed * buffer_size_bytes) / (metrics.processing_time_ms / 1000.0);
             }
 
             // Convert throughput to MB/s
@@ -154,39 +129,33 @@ calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buf
         Metrics aggregated_metrics;
         size_t num_threads = thread_metrics.size();
         aggregated_metrics.waiting_time_ms = std::accumulate(thread_metrics.begin(), thread_metrics.end(), 0.0,
-                                                             [](const auto &sum, const auto &m)
-                                                             {
+                                                             [](const auto &sum, const auto &m) {
                                                                  return sum + m.waiting_time_ms;
                                                              }) /
                                              num_threads;
         aggregated_metrics.processing_time_ms = std::accumulate(thread_metrics.begin(), thread_metrics.end(), 0.0,
-                                                                [](const auto &sum, const auto &m)
-                                                                {
+                                                                [](const auto &sum, const auto &m) {
                                                                     return sum + m.processing_time_ms;
                                                                 }) /
                                                 num_threads;
         aggregated_metrics.overall_time_ms = std::accumulate(thread_metrics.begin(), thread_metrics.end(), 0.0,
-                                                             [](const auto &sum, const auto &m)
-                                                             {
+                                                             [](const auto &sum, const auto &m) {
                                                                  return sum + m.overall_time_ms;
                                                              }) /
                                              num_threads;
         aggregated_metrics.total_throughput = std::accumulate(thread_metrics.begin(), thread_metrics.end(), 0.0,
-                                                              [](const auto &sum, const auto &m)
-                                                              {
+                                                              [](const auto &sum, const auto &m) {
                                                                   return sum + m.total_throughput;
                                                               });
         aggregated_metrics.per_buffer_throughput = std::accumulate(thread_metrics.begin(), thread_metrics.end(), 0.0,
-                                                                   [](const auto &sum, const auto &m)
-                                                                   {
+                                                                   [](const auto &sum, const auto &m) {
                                                                        return sum + m.per_buffer_throughput;
                                                                    }) /
                                                    num_threads;
 
         // Calculate standard deviations
         std::vector<double> waiting_times, processing_times, overall_times, total_throughputs, per_buffer_throughputs;
-        for (const auto &m : thread_metrics)
-        {
+        for (const auto &m: thread_metrics) {
             waiting_times.push_back(m.waiting_time_ms);
             processing_times.push_back(m.processing_time_ms);
             overall_times.push_back(m.overall_time_ms);
@@ -209,8 +178,7 @@ calculate_metrics(const std::vector<ProfilingTimestamps> &timestamps, size_t buf
     return component_metrics;
 }
 
-std::tuple<double, double, double, double> printAndReturnAverageLoad(RuntimeEnv &_xdbcenv)
-{
+std::tuple<double, double, double, double> printAndReturnAverageLoad(RuntimeEnv &_xdbcenv) {
     long long totalTimestamps = 0;
     size_t totalReadBufferIdsSize = 0;
     size_t totalDeserBufferIdsSize = 0;
@@ -219,8 +187,7 @@ std::tuple<double, double, double, double> printAndReturnAverageLoad(RuntimeEnv 
     size_t recordCount = _xdbcenv.queueSizes.size();
 
     std::tuple<double, double, double, double> ret(0, 0, 0, 0);
-    for (const auto &record : _xdbcenv.queueSizes)
-    {
+    for (const auto &record: _xdbcenv.queueSizes) {
         totalTimestamps += std::get<0>(record);
         totalReadBufferIdsSize += std::get<1>(record);
         totalDeserBufferIdsSize += std::get<2>(record);
@@ -228,8 +195,7 @@ std::tuple<double, double, double, double> printAndReturnAverageLoad(RuntimeEnv 
         totalNetworkBufferIdsSize += std::get<4>(record);
     }
 
-    if (recordCount > 0)
-    {
+    if (recordCount > 0) {
         double avgReadBufferIdsSize = static_cast<double>(totalReadBufferIdsSize) / recordCount;
         double avgDeserBufferIdsSize = static_cast<double>(totalDeserBufferIdsSize) / recordCount;
         double avgCompressedBufferIdsSize = static_cast<double>(totalDeserBufferIdsSize) / recordCount;
@@ -239,10 +205,9 @@ std::tuple<double, double, double, double> printAndReturnAverageLoad(RuntimeEnv 
                          avgNetworkBufferIdsSize);
 
         spdlog::get("XDBC.SERVER")->info("Average Load of Queues: Reader, Deserializer, Compressor, Sender");
-        spdlog::get("XDBC.SERVER")->info("{0}\t{1}\t{2}\t{3}", avgReadBufferIdsSize, avgDeserBufferIdsSize, avgCompressedBufferIdsSize, avgNetworkBufferIdsSize);
-    }
-    else
-    {
+        spdlog::get("XDBC.SERVER")->info("{0}\t{1}\t{2}\t{3}", avgReadBufferIdsSize, avgDeserBufferIdsSize,
+                                         avgCompressedBufferIdsSize, avgNetworkBufferIdsSize);
+    } else {
         spdlog::get("XDBC.SERVER")->info("No records available to calculate averages.");
     }
 

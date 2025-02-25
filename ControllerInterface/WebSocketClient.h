@@ -21,8 +21,7 @@ namespace asio = boost::asio;
 namespace websocket = beast::websocket;
 using json = nlohmann::json;
 
-class WebSocketClient
-{
+class WebSocketClient {
 public:
     // Constructor: Accept host and port for connection setup
     WebSocketClient(const std::string &host, const std::string &port);
