@@ -128,13 +128,14 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
 
     env.tuple_size = 0;
     env.tuples_per_buffer = 0;
+    env.max_threads = env.buffers_in_bufferpool;
 }
 
 nlohmann::json metrics_convert(RuntimeEnv &env) {
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     // auto env_pts = env->pts->copyAll();
 
-    if ((env.pts)) {
+    if ((env.pts) && (env.enable_updation == 1)) {
         std::vector<ProfilingTimestamps> env_pts;
         env_pts = env.pts->copy_newElements();
         auto component_metrics_ = calculate_metrics(env_pts, env.buffer_size);
@@ -159,49 +160,33 @@ nlohmann::json metrics_convert(RuntimeEnv &env) {
 nlohmann::json additional_msg(RuntimeEnv &env) {
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     metrics_json["totalTime_ms"] = env.tf_paras.elapsed_time;
+    // metrics_json["freeBufferQ_load"] = std::get<0>(env.tf_paras.latest_queueSizes);
+    // metrics_json["compressedBufferQ_load"] = std::get<1>(env.tf_paras.latest_queueSizes);
+    // metrics_json["decompressedBufferQ_load"] = std::get<2>(env.tf_paras.latest_queueSizes);
+    // metrics_json["deserializedBufferQ_load"] = std::get<3>(env.tf_paras.latest_queueSizes);
     return metrics_json;
 }
 
 void env_convert(RuntimeEnv &env, const nlohmann::json &env_json) {
     try {
-        // Acquire the lock to ensure thread-safe access to env_
-        // std::lock_guard<std::mutex> lock(env_mutex);
-        // Assuming `env_json` is a JSON object
-
-        const auto &env_object = env_json;
-        RuntimeEnv env_;
-        env_.transfer_id = std::stoll(env_json.at("transferID").get<std::string>());
-        env_.system = env_json.at("system").get<std::string>();
-        env_.compression_algorithm = env_json.at("compressionType").get<std::string>();
-        env_.iformat = std::stoi(env_json.at("intermediateFormat").get<std::string>());
-        env_.buffer_size = std::stoi(env_json.at("bufferSize").get<std::string>());
-        env_.buffers_in_bufferpool = std::stoi(env_json.at("bufferpoolSize").get<std::string>()) / env_.buffer_size;
-        env_.sleep_time = std::chrono::milliseconds(std::stoll(env_json.at("sleepTime").get<std::string>()));
-        env_.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
-        env_.read_partitions = std::stoi(env_json.at("readPartitions").get<std::string>());
-        env_.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
-        env_.network_parallelism = std::stoi(env_json.at("netParallelism").get<std::string>());
-        env_.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
+        // env.transfer_id = std::stoll(env_json.at("transferID").get<std::string>());
+        // env.system = env_json.at("system").get<std::string>();
+        // env.compression_algorithm = env_json.at("compressionType").get<std::string>();
+        // env.iformat = std::stoi(env_json.at("intermediateFormat").get<std::string>());
+        // env.buffer_size = std::stoi(env_json.at("bufferSize").get<std::string>());
+        // env.buffers_in_bufferpool = std::stoi(env_json.at("bufferpoolSize").get<std::string>()) / env_.buffer_size;
+        // env.sleep_time = std::chrono::milliseconds(std::stoll(env_json.at("sleepTime").get<std::string>()));
+        // env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
+        // env.read_partitions = std::stoi(env_json.at("readPartitions").get<std::string>());
+        // env.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
+        // env.network_parallelism = std::stoi(env_json.at("netParallelism").get<std::string>());
+        // env.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
 
         if (env.enable_updation == 1) {
 
-            // Lock the mutex to ensure exclusive access to env_
-            // std::lock_guard<std::mutex> lock(env.env_mutex);
-
-            env.transfer_id = env_.transfer_id;
-            env.system = env_.system;
-            env.compression_algorithm = env_.compression_algorithm;
-            env.iformat = env_.iformat;
-            env.buffer_size = env_.buffer_size;
-            env.buffers_in_bufferpool = env_.buffers_in_bufferpool;
-            env.sleep_time = env_.sleep_time;
-            env.read_parallelism = env_.read_parallelism;
-            env.read_partitions = env_.read_partitions;
-            env.deser_parallelism = env_.deser_parallelism;
-            env.network_parallelism = env_.network_parallelism;
-            env.compression_parallelism = env_.compression_parallelism;
-
-            // env.env_condition.notify_all();
+            env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
+            env.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
+            env.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
         }
     }
     catch (const std::exception &e) {
