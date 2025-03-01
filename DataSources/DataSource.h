@@ -6,7 +6,8 @@
 #include <vector>
 #include <chrono>
 #include <map>
-#include "../customQueue.h"
+#include "../EnvironmentReconfigure/EnvironmentManager.h"
+// #include "../customQueue.h"
 
 // #define BUFFER_SIZE 1000
 // #define BUFFERPOOL_SIZE 1000
@@ -36,6 +37,7 @@ typedef std::shared_ptr<customQueue<ProfilingTimestamps>> PTQ_ptr;
 
 struct transfer_details {
     float elapsed_time = 0.0f; // Default value for elapsed_time
+    std::tuple<size_t, size_t, size_t, size_t> latest_queueSizes;
 };
 
 struct RuntimeEnv {
@@ -77,6 +79,9 @@ struct RuntimeEnv {
     int spawn_source;
     std::atomic<int> enable_updation;
     transfer_details tf_paras;
+    int max_threads = 16;
+    EnvironmentManager env_manager;
+
     PTQ_ptr pts;
 };
 
