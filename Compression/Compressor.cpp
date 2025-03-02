@@ -110,10 +110,10 @@ void Compressor::compress(int thr, const std::string &compName) {
 
     //notify that we finished
     xdbcEnv->finishedCompThreads.fetch_add(1);
-    if (xdbcEnv->finishedCompThreads == xdbcEnv->compression_parallelism) {
-        for (int i = 0; i < xdbcEnv->network_parallelism; i++)
-            xdbcEnv->sendBufferPtr->push(-1);
-    }
+    // if (xdbcEnv->finishedCompThreads == xdbcEnv->compression_parallelism) {
+    //     for (int i = 0; i < xdbcEnv->network_parallelism; i++)
+    //         xdbcEnv->sendBufferPtr->push(-1);
+    // }
 
 }
 

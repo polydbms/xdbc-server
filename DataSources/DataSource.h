@@ -85,7 +85,8 @@ struct RuntimeEnv
     std::atomic<int> enable_updation = 0;
     transfer_details tf_paras;
     int max_threads = 16;
-    EnvironmentManager env_manager;
+    EnvironmentManager env_manager1;
+    EnvironmentManager env_manager2;
 
     PTQ_ptr pts;
 };
