@@ -33,7 +33,6 @@ public:
     explicit XDBCServer(RuntimeEnv &env);
 
     int serve();
-    // int finishserve();
 
     int send(int threadno, DataSource &dataReader);
 

@@ -82,7 +82,8 @@ struct RuntimeEnv
     int profilingInterval;
 
     int spawn_source;
-    std::atomic<int> enable_updation = 0;
+    std::atomic<int> enable_updation_xServe = 0;
+    std::atomic<int> enable_updation_DS = 0;
     transfer_details tf_paras;
     int max_threads = 16;
     EnvironmentManager env_manager_xServer;

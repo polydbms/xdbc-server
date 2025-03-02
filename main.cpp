@@ -153,7 +153,7 @@ nlohmann::json metrics_convert(RuntimeEnv &env)
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     // auto env_pts = env->pts->copyAll();
 
-    if ((env.pts) && (env.enable_updation == 1))
+    if ((env.pts) && (env.enable_updation_DS == 1) && (env.enable_updation_xServe == 1))
     {
         std::vector<ProfilingTimestamps> env_pts;
         env_pts = env.pts->copy_newElements();
@@ -205,12 +205,15 @@ void env_convert(RuntimeEnv &env, const nlohmann::json &env_json)
         // env.network_parallelism = std::stoi(env_json.at("netParallelism").get<std::string>());
         // env.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
 
-        if (env.enable_updation == 1)
+        if (env.enable_updation_DS == 1)
         {
 
             // env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
-            // env.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
-            // env.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
+            env.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
+        }
+        if (env.enable_updation_xServe == 1)
+        {
+            env.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
         }
     }
     catch (const std::exception &e)
@@ -228,7 +231,6 @@ int main(int argc, char *argv[])
     handleCMDParams(argc, argv, xdbcEnv);
 
     // ***Setup websocket interface for controller***
-    xdbcEnv.enable_updation = 1;
     std::thread io_thread;
     WebSocketClient ws_client("xdbc-controller", "8003");
     if (xdbcEnv.spawn_source == 1)
