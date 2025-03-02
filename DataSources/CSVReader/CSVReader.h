@@ -19,7 +19,7 @@ public:
 private:
     int readCSV(int thr);
 
-    int deserializeCSV(int thr);
+    int deserializeCSV(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers);
 
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;

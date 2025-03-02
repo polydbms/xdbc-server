@@ -118,13 +118,11 @@ CSVReader::CSVReader(RuntimeEnv &xdbcEnv, const std::string &tableName) : DataSo
 
 void CSVReader::readData()
 {
-    xdbcEnv->env_manager2.start();
+    xdbcEnv->env_manager_DS.start();
     auto start_read = std::chrono::steady_clock::now();
 
-    std::vector<int> threadWrittenTuples(xdbcEnv->deser_parallelism, 0);  // Initialize all elements to 0
-    std::vector<int> threadWrittenBuffers(xdbcEnv->deser_parallelism, 0); // Initialize all elements to 0
-    // int threadWrittenTuples[xdbcEnv->read_parallelism];
-    // int threadWrittenBuffers[xdbcEnv->read_parallelism];
+    std::vector<int> threadWrittenTuples(xdbcEnv->max_threads, 0);  // Initialize all elements to 0
+    std::vector<int> threadWrittenBuffers(xdbcEnv->max_threads, 0); // Initialize all elements to 0
     std::thread readThreads[xdbcEnv->read_parallelism];
     std::thread deSerThreads[xdbcEnv->deser_parallelism];
 
@@ -160,52 +158,52 @@ void CSVReader::readData()
     Part fP{};
     fP.id = -1;
 
-    for (int i = 0; i < xdbcEnv->read_parallelism; i++)
-    {
-        xdbcEnv->partPtr->push(fP);
-        readThreads[i] = std::thread(&CSVReader::readCSV, this, i);
-    }
-
-    auto start_deser = std::chrono::steady_clock::now();
-    // for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
-    // {
-
-    // deSerThreads[i] = std::thread(&CSVReader::deserializeCSV, this, i);
-    //   std::ref(threadWrittenTuples[i]), std::ref(threadWrittenBuffers[i]));
-    // }
-
-    //*** Create threads for deserialize operation
-    xdbcEnv->env_manager2.registerOperation("deserialize", [&](int thr)
-                                            { try {
-    if (thr >= xdbcEnv->deser_parallelism) {
+    //*** Create threads for read operation
+    xdbcEnv->env_manager_DS.registerOperation("read", [&](int thr)
+                                              { try {
+    if (thr >= xdbcEnv->max_threads) {
     spdlog::get("XDBC.SERVER")->error("No of threads exceed limit");
     return;
     }
-    // this->deserializeCSV(thr, threadWrittenTuples[thr], threadWrittenBuffers[thr]);
-    deserializeCSV(thr);
+    xdbcEnv->partPtr->push(fP);
+    readCSV(thr);
+    } catch (const std::exception& e) {
+    spdlog::get("XDBC.SERVER")->error("Exception in thread {}: {}", thr, e.what());
+    } catch (...) {
+    spdlog::get("XDBC.SERVER")->error("Unknown exception in thread {}", thr);
+    } }, xdbcEnv->freeBufferPtr);
+    xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism); // start read component threads
+    //*** Finish creating threads for read operation
+
+    auto start_deser = std::chrono::steady_clock::now();
+
+    //*** Create threads for deserialize operation
+    xdbcEnv->env_manager_DS.registerOperation("deserialize", [&](int thr)
+                                              { try {
+    if (thr >= xdbcEnv->max_threads) {
+    spdlog::get("XDBC.SERVER")->error("No of threads exceed limit");
+    return;
+    }
+    deserializeCSV(thr, threadWrittenTuples[thr], threadWrittenBuffers[thr]);
     } catch (const std::exception& e) {
     spdlog::get("XDBC.SERVER")->error("Exception in thread {}: {}", thr, e.what());
     } catch (...) {
     spdlog::get("XDBC.SERVER")->error("Unknown exception in thread {}", thr);
     } }, xdbcEnv->deserBufferPtr);
-    xdbcEnv->env_manager2.configureThreads("deserialize", xdbcEnv->deser_parallelism); // start compress component threads
+    xdbcEnv->env_manager_DS.configureThreads("deserialize", xdbcEnv->deser_parallelism); // start deserialize component threads
     //*** Finish creating threads for deserialize operation
+
+    // Wait for read to finish and then kill deserialize
+    xdbcEnv->env_manager_DS.joinThreads("read");
+    xdbcEnv->env_manager_DS.configureThreads("deserialize", 0);
+    xdbcEnv->env_manager_DS.joinThreads("deserialize");
 
     int totalTuples = 0;
     int totalBuffers = 0;
-    // totalTuples = std::accumulate(threadWrittenTuples.begin(), threadWrittenTuples.end(), 0);
-
-    xdbcEnv->env_manager2.joinThreads("deserialize");
-    for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
+    for (int i = 0; i < xdbcEnv->max_threads; i++)
     {
-        // deSerThreads[i].join();
         totalTuples += threadWrittenTuples[i];
         totalBuffers += threadWrittenBuffers[i];
-    }
-
-    for (int i = 0; i < xdbcEnv->read_parallelism; i++)
-    {
-        readThreads[i].join();
     }
 
     finishedReading.store(true);
@@ -213,7 +211,7 @@ void CSVReader::readData()
     auto total_deser_time = std::chrono::duration_cast<std::chrono::microseconds>(
                                 std::chrono::steady_clock::now() - start_deser)
                                 .count();
-    xdbcEnv->env_manager2.stop(); // *** Stop Reconfigurration handler
+    xdbcEnv->env_manager_DS.stop(); // *** Stop Reconfigurration handler
 
     spdlog::get("XDBC.SERVER")->info("Read+Deser | Elapsed time: {0} ms for #tuples: {1}, #buffers: {2}", total_deser_time / 1000, totalTuples, totalBuffers);
 }
@@ -309,11 +307,11 @@ int CSVReader::readCSV(int thr)
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "end"});
 
     xdbcEnv->finishedReadThreads.fetch_add(1);
-    if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
-    {
-        for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
-            xdbcEnv->deserBufferPtr->push(-1);
-    }
+    // if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
+    // {
+    //     for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
+    //         xdbcEnv->deserBufferPtr->push(-1);
+    // }
 
     file.close();
     spdlog::get("XDBC.SERVER")->info("Read thr {0} finished reading", thr);
@@ -322,12 +320,8 @@ int CSVReader::readCSV(int thr)
     return 1;
 }
 
-// int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers)
-int CSVReader::deserializeCSV(int thr)
+int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers)
 {
-
-    int totalThreadWrittenTuples;
-    int totalThreadWrittenBuffers;
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "start"});
 
@@ -595,11 +589,11 @@ int CSVReader::deserializeCSV(int thr)
     spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} finished. buffers: {1}, tuples {2}", thr, totalThreadWrittenBuffers, totalThreadWrittenTuples);
 
     xdbcEnv->finishedDeserThreads.fetch_add(1);
-    if (xdbcEnv->finishedDeserThreads == xdbcEnv->deser_parallelism)
-    {
-        for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
-            xdbcEnv->compBufferPtr->push(-1);
-    }
+    // if (xdbcEnv->finishedDeserThreads == xdbcEnv->deser_parallelism)
+    // {
+    //     for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
+    //         xdbcEnv->compBufferPtr->push(-1);
+    // }
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "end"});
 
