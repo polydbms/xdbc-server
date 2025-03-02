@@ -181,10 +181,10 @@ nlohmann::json additional_msg(RuntimeEnv &env)
 {
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     metrics_json["totalTime_ms"] = env.tf_paras.elapsed_time;
-    // metrics_json["freeBufferQ_load"] = std::get<0>(env.tf_paras.latest_queueSizes);
-    // metrics_json["compressedBufferQ_load"] = std::get<1>(env.tf_paras.latest_queueSizes);
-    // metrics_json["decompressedBufferQ_load"] = std::get<2>(env.tf_paras.latest_queueSizes);
-    // metrics_json["deserializedBufferQ_load"] = std::get<3>(env.tf_paras.latest_queueSizes);
+    metrics_json["readBufferQ_load"] = std::get<0>(env.tf_paras.latest_queueSizes);
+    metrics_json["deserializedBufferQ_load"] = std::get<1>(env.tf_paras.latest_queueSizes);
+    metrics_json["compressedBufferQ_load"] = std::get<2>(env.tf_paras.latest_queueSizes);
+    metrics_json["sendBufferQ_load"] = std::get<3>(env.tf_paras.latest_queueSizes);
     return metrics_json;
 }
 
@@ -192,23 +192,14 @@ void env_convert(RuntimeEnv &env, const nlohmann::json &env_json)
 {
     try
     {
-        // env.transfer_id = std::stoll(env_json.at("transferID").get<std::string>());
-        // env.system = env_json.at("system").get<std::string>();
-        // env.compression_algorithm = env_json.at("compressionType").get<std::string>();
-        // env.iformat = std::stoi(env_json.at("intermediateFormat").get<std::string>());
         // env.buffer_size = std::stoi(env_json.at("bufferSize").get<std::string>());
         // env.buffers_in_bufferpool = std::stoi(env_json.at("bufferpoolSize").get<std::string>()) / env_.buffer_size;
-        // env.sleep_time = std::chrono::milliseconds(std::stoll(env_json.at("sleepTime").get<std::string>()));
         // env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
         // env.read_partitions = std::stoi(env_json.at("readPartitions").get<std::string>());
-        // env.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
         // env.network_parallelism = std::stoi(env_json.at("netParallelism").get<std::string>());
-        // env.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
 
         if (env.enable_updation_DS == 1)
         {
-
-            // env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
             env.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
         }
         if (env.enable_updation_xServe == 1)
@@ -245,7 +236,7 @@ int main(int argc, char *argv[])
             std::this_thread::sleep_for(std::chrono::milliseconds(100));
         }
     }
-    // ***Finished setup websocket interface for controller***
+    // ***Finished setting up websocket interface for controller***
 
     auto start = std::chrono::steady_clock::now();
 
@@ -254,7 +245,7 @@ int main(int argc, char *argv[])
 
     auto end = std::chrono::steady_clock::now();
     auto total_time = std::chrono::duration_cast<std::chrono::milliseconds>(end - start).count();
-
+    xdbcEnv.tf_paras.elapsed_time = static_cast<float>(total_time);
     spdlog::get("XDBC.SERVER")->info("Total elapsed time: {} ms", total_time);
 
     auto pts = std::vector<ProfilingTimestamps>(xdbcEnv.pts->size());

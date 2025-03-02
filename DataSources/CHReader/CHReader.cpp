@@ -88,7 +88,16 @@ void CHReader::readData()
     xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism); // start deserialize component threads
     //*** Finish creating threads for deserialize operation
 
-    // Wait for read to finish
+    if (xdbcEnv->spawn_source == 1)
+    {
+        xdbcEnv->enable_updation_DS = 1;
+    }
+    // while (xdbcEnv->enable_updation_DS == 1) // Reconfigure threads as long as it is allowed
+    // {
+    //     std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+    //     xdbcEnv->env_manager_DS.configureThreads("deserialize", xdbcEnv->deser_parallelism);
+    // }
+
     xdbcEnv->env_manager_DS.joinThreads("read");
 
     int total = 0;
@@ -275,11 +284,11 @@ int CHReader::chWriteToBp(int thr, int &totalThreadWrittenTuples, int &totalThre
     }
     // notify that we finished
     xdbcEnv->finishedReadThreads.fetch_add(1);
-    // if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
-    // {
-    //     for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
-    //         xdbcEnv->compBufferPtr->push(-1);
-    // }
+    if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
+    {
+        xdbcEnv->enable_updation_DS = 0;
+        xdbcEnv->enable_updation_xServe = 0;
+    }
 
     return 1;
 }

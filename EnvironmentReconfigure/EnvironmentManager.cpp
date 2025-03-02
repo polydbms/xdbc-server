@@ -137,7 +137,7 @@ void EnvironmentManager::run()
                             spdlog::error("Unknown exception in thread {}", thread_id);
                         } });
                 }
-                spdlog::info("Reconfigure thread for operation {0} by {1}", name, delta_threads);
+                spdlog::info("Reconfigure threads for operation {0} by +{1}", name, delta_threads);
             }
             else if (delta_threads < 0)
             {
@@ -151,7 +151,7 @@ void EnvironmentManager::run()
                     }
                     operation.poisonQueue->push(-1);
                 }
-                spdlog::info("Reconfigure thread for operation {0} by {1}", name, delta_threads);
+                spdlog::info("Reconfigure threads for operation {0} by {1}", name, delta_threads);
             }
 
             operation.active_threads = operation.desired_threads;

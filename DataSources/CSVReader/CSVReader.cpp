@@ -320,8 +320,6 @@ int CSVReader::readCSV(int thr)
     {
         xdbcEnv->enable_updation_DS = 0;
         xdbcEnv->enable_updation_xServe = 0;
-        //     for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
-        //         xdbcEnv->deserBufferPtr->push(-1);
     }
 
     file.close();
@@ -600,11 +598,6 @@ int CSVReader::deserializeCSV(int thr, int &totalThreadWrittenTuples, int &total
     spdlog::get("XDBC.SERVER")->info("CSV Deser thread {0} finished. buffers: {1}, tuples {2}", thr, totalThreadWrittenBuffers, totalThreadWrittenTuples);
 
     xdbcEnv->finishedDeserThreads.fetch_add(1);
-    // if (xdbcEnv->finishedDeserThreads == xdbcEnv->deser_parallelism)
-    // {
-    //     for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
-    //         xdbcEnv->compBufferPtr->push(-1);
-    // }
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "end"});
 

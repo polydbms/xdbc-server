@@ -222,6 +222,16 @@ int PGReader::read_pq_copy()
     xdbcEnv->env_manager_DS.configureThreads("deserialize", xdbcEnv->deser_parallelism); // start deserialize component threads
     //*** Finish creating threads for deserialize operation
 
+    if (xdbcEnv->spawn_source == 1)
+    {
+        xdbcEnv->enable_updation_DS = 1;
+    }
+    while (xdbcEnv->enable_updation_DS == 1) // Reconfigure threads as long as it is allowed
+    {
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        xdbcEnv->env_manager_DS.configureThreads("deserialize", xdbcEnv->deser_parallelism);
+    }
+
     // Wait for read to finish and then kill deserialize
     xdbcEnv->env_manager_DS.joinThreads("read");
     xdbcEnv->env_manager_DS.configureThreads("deserialize", 0);
@@ -403,11 +413,6 @@ int PGReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &totalTh
     spdlog::get("XDBC.SERVER")->info("PG Deser thread {0} finished. buffers: {1}, tuples {2}", thr, totalThreadWrittenBuffers, totalThreadWrittenTuples);
 
     xdbcEnv->finishedDeserThreads.fetch_add(1);
-    // if (xdbcEnv->finishedDeserThreads == xdbcEnv->deser_parallelism)
-    // {
-    //     for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
-    //         xdbcEnv->compBufferPtr->push(-1);
-    // }
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "end"});
 
@@ -551,11 +556,11 @@ int PGReader::readPG(int thr)
     xdbcEnv->deserBufferPtr->push(curBid);
 
     xdbcEnv->finishedReadThreads.fetch_add(1);
-    // if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
-    // {
-    //     for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
-    //         xdbcEnv->deserBufferPtr->push(-1);
-    // }
+    if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
+    {
+        xdbcEnv->enable_updation_DS = 0;
+        xdbcEnv->enable_updation_xServe = 0;
+    }
 
     int deserFinishedCounter = 0;
 
