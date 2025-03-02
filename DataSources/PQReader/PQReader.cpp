@@ -9,29 +9,27 @@
 #include <fstream>
 #include <filesystem>
 
-PQReader::PQReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
-        DataSource(xdbcEnv, tableName),
-        bp(*xdbcEnv.bpPtr),
-        finishedReading(false),
-        totalReadBuffers(0),
-        xdbcEnv(&xdbcEnv) {
+PQReader::PQReader(RuntimeEnv &xdbcEnv, const std::string &tableName) : DataSource(xdbcEnv, tableName),
+                                                                        bp(*xdbcEnv.bpPtr),
+                                                                        finishedReading(false),
+                                                                        totalReadBuffers(0),
+                                                                        xdbcEnv(&xdbcEnv)
+{
     spdlog::get("XDBC.SERVER")->info("Parquet Constructor called with table: {0}", tableName);
-
 }
 
-
-void PQReader::readData() {
+void PQReader::readData()
+{
+    xdbcEnv->env_manager_DS.start();
     auto start_read = std::chrono::steady_clock::now();
 
-    int threadWrittenTuples[xdbcEnv->deser_parallelism];
-    int threadWrittenBuffers[xdbcEnv->deser_parallelism];
+    std::vector<int> threadWrittenTuples(xdbcEnv->max_threads, 0);  // Initialize all elements to 0
+    std::vector<int> threadWrittenBuffers(xdbcEnv->max_threads, 0); // Initialize all elements to 0
     std::thread readThreads[xdbcEnv->read_parallelism];
     std::thread deSerThreads[xdbcEnv->deser_parallelism];
 
-
     size_t numFiles = std::distance(std::filesystem::directory_iterator("/dev/shm/" + tableName),
                                     std::filesystem::directory_iterator{});
-
 
     spdlog::get("XDBC.SERVER")->info("Parquet files: {0}", numFiles);
 
@@ -43,7 +41,8 @@ void PQReader::readData() {
     if (partSizeDiv.rem > 0)
         partSize++;
 
-    for (int i = partNum - 1; i >= 0; i--) {
+    for (int i = partNum - 1; i >= 0; i--)
+    {
         Part p{};
         p.id = i;
         p.startOff = i * partSize;
@@ -54,63 +53,79 @@ void PQReader::readData() {
 
         xdbcEnv->partPtr->push(p);
 
-        spdlog::get("XDBC.SERVER")->info("Partition {0} [{1},{2}] pushed into queue",
-                                         p.id, p.startOff, p.endOff);
-
+        spdlog::get("XDBC.SERVER")->info("Partition {0} [{1},{2}] pushed into queue", p.id, p.startOff, p.endOff);
     }
 
-    //final partition
+    // final partition
     Part fP{};
     fP.id = -1;
 
-    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
-        xdbcEnv->partPtr->push(fP);
-        readThreads[i] = std::thread(&PQReader::readPQ, this, i);
+    //*** Create threads for read operation
+    xdbcEnv->env_manager_DS.registerOperation("read", [&](int thr)
+                                              { try {
+    if (thr >= xdbcEnv->max_threads) {
+    spdlog::get("XDBC.SERVER")->error("No of threads exceed limit");
+    return;
     }
-
+    xdbcEnv->partPtr->push(fP);
+    readPQ(thr);
+    } catch (const std::exception& e) {
+    spdlog::get("XDBC.SERVER")->error("Exception in thread {}: {}", thr, e.what());
+    } catch (...) {
+    spdlog::get("XDBC.SERVER")->error("Unknown exception in thread {}", thr);
+    } }, xdbcEnv->freeBufferPtr);
+    xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism); // start read component threads
+    //*** Finish creating threads for read operation
 
     auto start_deser = std::chrono::steady_clock::now();
-    for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
-        threadWrittenTuples[i] = 0;
-        threadWrittenBuffers[i] = 0;
 
-        deSerThreads[i] = std::thread(&PQReader::deserializePQ,
-                                      this, i,
-                                      std::ref(threadWrittenTuples[i]), std::ref(threadWrittenBuffers[i])
-        );
-
+    //*** Create threads for deserialize operation
+    xdbcEnv->env_manager_DS.registerOperation("deserialize", [&](int thr)
+                                              { try {
+    if (thr >= xdbcEnv->max_threads) {
+    spdlog::get("XDBC.SERVER")->error("No of threads exceed limit");
+    return;
     }
+    deserializePQ(thr, threadWrittenTuples[thr], threadWrittenBuffers[thr]);
+    } catch (const std::exception& e) {
+    spdlog::get("XDBC.SERVER")->error("Exception in thread {}: {}", thr, e.what());
+    } catch (...) {
+    spdlog::get("XDBC.SERVER")->error("Unknown exception in thread {}", thr);
+    } }, xdbcEnv->deserBufferPtr);
+    xdbcEnv->env_manager_DS.configureThreads("deserialize", xdbcEnv->deser_parallelism); // start deserialize component threads
+    //*** Finish creating threads for deserialize operation
+
+    // Wait for read to finish and then kill deserialize
+    xdbcEnv->env_manager_DS.joinThreads("read");
+    xdbcEnv->env_manager_DS.configureThreads("deserialize", 0);
+    xdbcEnv->env_manager_DS.joinThreads("deserialize");
 
     int totalTuples = 0;
     int totalBuffers = 0;
-    for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
-        deSerThreads[i].join();
+    for (int i = 0; i < xdbcEnv->max_threads; i++)
+    {
         totalTuples += threadWrittenTuples[i];
         totalBuffers += threadWrittenBuffers[i];
-    }
-
-
-    for (int i = 0; i < xdbcEnv->read_parallelism; i++) {
-        readThreads[i].join();
     }
 
     finishedReading.store(true);
 
     auto total_deser_time = std::chrono::duration_cast<std::chrono::microseconds>(
-            std::chrono::steady_clock::now() - start_deser).count();
-
-    spdlog::get("XDBC.SERVER")->info("Read+Deser | Elapsed time: {0} ms for #tuples: {1}, #buffers: {2}",
-                                     total_deser_time / 1000,
-                                     totalTuples, totalBuffers);
-
+                                std::chrono::steady_clock::now() - start_deser)
+                                .count();
+    xdbcEnv->env_manager_DS.stop(); // *** Stop Reconfigurration handler
+    spdlog::get("XDBC.SERVER")->info("Read+Deser | Elapsed time: {0} ms for #tuples: {1}, #buffers: {2}", total_deser_time / 1000, totalTuples, totalBuffers);
 }
 
-int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers) {
+int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers)
+{
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "start"});
 
-    if (xdbcEnv->skip_deserializer) {
-        while (true) {
+    if (xdbcEnv->skip_deserializer)
+    {
+        while (true)
+        {
             int inBid = xdbcEnv->deserBufferPtr->pop();
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
 
@@ -121,7 +136,9 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
             xdbcEnv->compBufferPtr->push(inBid);
             totalThreadWrittenBuffers++;
         }
-    } else {
+    }
+    else
+    {
         // Pop a buffer from deserBufferPtr
         auto deserBuff = xdbcEnv->deserBufferPtr->pop();
         xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
@@ -137,25 +154,35 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
         // Precompute column offsets, sizes, and deserializers
         std::vector<size_t> columnOffsets(schemaSize);
         std::vector<size_t> columnSizes(schemaSize);
-        std::vector<std::function<void(parquet::StreamReader & , void * , int)>> deserializers(schemaSize);
+        std::vector<std::function<void(parquet::StreamReader &, void *, int)>> deserializers(schemaSize);
 
         size_t rowSize = 0;
-        for (size_t i = 0; i < schemaSize; ++i) {
+        for (size_t i = 0; i < schemaSize; ++i)
+        {
             const auto &attr = xdbcEnv->schema[i];
             columnOffsets[i] = rowSize;
-            if (attr.tpe[0] == 'I') {
-                columnSizes[i] = 4;  // sizeof(int)
+            if (attr.tpe[0] == 'I')
+            {
+                columnSizes[i] = 4; // sizeof(int)
                 deserializers[i] = deserialize<int>;
-            } else if (attr.tpe[0] == 'D') {
+            }
+            else if (attr.tpe[0] == 'D')
+            {
                 columnSizes[i] = 8;
                 deserializers[i] = deserialize<double>;
-            } else if (attr.tpe[0] == 'C') {
-                columnSizes[i] = 1;  // sizeof(char)
+            }
+            else if (attr.tpe[0] == 'C')
+            {
+                columnSizes[i] = 1; // sizeof(char)
                 deserializers[i] = deserialize<char>;
-            } else if (attr.tpe[0] == 'S') {
+            }
+            else if (attr.tpe[0] == 'S')
+            {
                 columnSizes[i] = attr.size;
                 deserializers[i] = deserialize<std::string>;
-            } else {
+            }
+            else
+            {
                 throw std::runtime_error("Unsupported column type: " + attr.tpe);
             }
             rowSize += columnSizes[i];
@@ -163,14 +190,17 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
 
         // Preallocate fixed-size buffers for string attributes
         std::vector<std::string> stringBuffers(schemaSize);
-        for (int colIdx = 0; colIdx < schemaSize; ++colIdx) {
+        for (int colIdx = 0; colIdx < schemaSize; ++colIdx)
+        {
             const auto &attr = xdbcEnv->schema[colIdx];
-            if (attr.tpe[0] == 'S') { // STRING or CHAR
+            if (attr.tpe[0] == 'S')
+            {                                                  // STRING or CHAR
                 stringBuffers[colIdx].resize(attr.size, '\0'); // Fixed size with null padding
             }
         }
 
-        while (true) {
+        while (true)
+        {
             // Get buffer data from deserBuff
             const auto *bufferPtr = bp[deserBuff].data() + sizeof(Header);
 
@@ -188,28 +218,36 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
 
             // Deserialize data using StreamReader
 
-            while (!stream.eof()) {
+            while (!stream.eof())
+            {
 
-                for (int colIdx = 0; colIdx < schemaSize; ++colIdx) {
+                for (int colIdx = 0; colIdx < schemaSize; ++colIdx)
+                {
                     const auto &attr = xdbcEnv->schema[colIdx];
 
                     void *dest = nullptr;
 
-                    if (xdbcEnv->iformat == 1) {
+                    if (xdbcEnv->iformat == 1)
+                    {
                         dest = writeBuffPtr + numRows * xdbcEnv->tuple_size + columnOffsets[colIdx];
-                    } else if (xdbcEnv->iformat == 2) {
+                    }
+                    else if (xdbcEnv->iformat == 2)
+                    {
                         dest = writeBuffPtr + columnOffsets[colIdx] * xdbcEnv->tuples_per_buffer +
                                numRows * attr.size;
                     }
 
-                    //TODO: check if we can pass the preallocated strings to our deserializers
-                    if (attr.tpe[0] == 'S') {
-                        //std::string buffer;
+                    // TODO: check if we can pass the preallocated strings to our deserializers
+                    if (attr.tpe[0] == 'S')
+                    {
+                        // std::string buffer;
                         auto &buffer = stringBuffers[colIdx];
                         stream >> buffer;
                         std::memset(dest, 0, attr.size);
                         std::memcpy(dest, buffer.data(), buffer.size());
-                    } else {
+                    }
+                    else
+                    {
                         // Use deserializer for other types
                         deserializers[colIdx](stream, dest, attr.size);
                     }
@@ -220,7 +258,8 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
                 ++numRows;
                 ++totalThreadWrittenTuples;
 
-                if (numRows == xdbcEnv->tuples_per_buffer) {
+                if (numRows == xdbcEnv->tuples_per_buffer)
+                {
                     // Write header and push buffer
                     Header head{};
                     head.totalTuples = numRows;
@@ -228,7 +267,7 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
                     head.intermediateFormat = xdbcEnv->iformat;
                     std::memcpy(bp[writeBuff].data(), &head, sizeof(Header));
 
-                    ///test
+                    /// test
                     /*const char *dataPtr = reinterpret_cast<const char *>(bp[writeBuff].data() + sizeof(Header));
 
                     spdlog::get("XDBC.SERVER")->info("First row values:");
@@ -260,16 +299,16 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
 
                         spdlog::get("XDBC.SERVER")->info(oss.str());
                     }*/
-                    //test
+                    // test
 
                     xdbcEnv->pts->push(
-                            ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
+                        ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "push"});
 
                     xdbcEnv->compBufferPtr->push(writeBuff);
 
                     writeBuff = xdbcEnv->freeBufferPtr->pop();
                     xdbcEnv->pts->push(
-                            ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
+                        ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "pop"});
 
                     writeBuffPtr = bp[writeBuff].data() + sizeof(Header);
                     totalThreadWrittenBuffers++;
@@ -285,7 +324,8 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
         }
 
         // Handle remaining rows
-        if (numRows > 0) {
+        if (numRows > 0)
+        {
             spdlog::get("XDBC.SERVER")->info("PQ Deser thread {0} has {1} remaining tuples", thr, numRows);
             Header head{};
             head.totalTuples = numRows;
@@ -306,17 +346,19 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
 
     // Notify completion
     xdbcEnv->finishedDeserThreads.fetch_add(1);
-    if (xdbcEnv->finishedDeserThreads == xdbcEnv->deser_parallelism) {
-        for (int i = 0; i < xdbcEnv->compression_parallelism; ++i) {
-            xdbcEnv->compBufferPtr->push(-1);
-        }
-    }
+    // if (xdbcEnv->finishedDeserThreads == xdbcEnv->deser_parallelism)
+    // {
+    //     for (int i = 0; i < xdbcEnv->compression_parallelism; ++i)
+    //     {
+    //         xdbcEnv->compBufferPtr->push(-1);
+    //     }
+    // }
 
     return 0;
 }
 
-
-int PQReader::readPQ(int thr) {
+int PQReader::readPQ(int thr)
+{
 
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "start"});
 
@@ -325,15 +367,18 @@ int PQReader::readPQ(int thr) {
 
     // Fetch the next partition to process
     Part curPart = xdbcEnv->partPtr->pop();
-    while (curPart.id != -1) {
+    while (curPart.id != -1)
+    {
         // Iterate over the range of partitions
-        for (int partitionId = curPart.startOff; partitionId < curPart.endOff; ++partitionId) {
+        for (int partitionId = curPart.startOff; partitionId < curPart.endOff; ++partitionId)
+        {
             // Construct the file name for the current partition
             std::string fileName = baseDir + tableName + "_part" + std::to_string(partitionId) + ".parquet";
 
             // Open the Parquet file
             std::ifstream parquetFile(fileName, std::ios::binary | std::ios::in);
-            if (!parquetFile.is_open()) {
+            if (!parquetFile.is_open())
+            {
                 throw std::runtime_error("Failed to open Parquet file: " + fileName);
             }
 
@@ -356,16 +401,18 @@ int PQReader::readPQ(int thr) {
             std::memcpy(writeBuffPtr, &head, sizeof(Header));
 
             // Ensure the buffer is large enough
-            if (fileSize > xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size) {
+            if (fileSize > xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size)
+            {
                 throw std::runtime_error("Parquet file is larger than the buffer size.");
             }
 
             parquetFile.read(reinterpret_cast<char *>(writeBuffPtr + sizeof(Header)), fileSize);
-            if (parquetFile.gcount() != fileSize) {
+            if (parquetFile.gcount() != fileSize)
+            {
                 throw std::runtime_error("Failed to read the entire Parquet file.");
             }
 
-            //spdlog::get("XDBC.SERVER")->info("Reader thr {} writing buffer {} with size {}", thr, writeBuff, fileSize);
+            // spdlog::get("XDBC.SERVER")->info("Reader thr {} writing buffer {} with size {}", thr, writeBuff, fileSize);
 
             // Push the buffer to the next stage
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "push"});
@@ -376,24 +423,25 @@ int PQReader::readPQ(int thr) {
 
         // Fetch the next partition
         curPart = xdbcEnv->partPtr->pop();
-
     }
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "end"});
 
     xdbcEnv->finishedReadThreads.fetch_add(1);
-    if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism) {
-        for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
-            xdbcEnv->deserBufferPtr->push(-1);
-    }
+    // if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
+    // {
+    //     for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
+    //         xdbcEnv->deserBufferPtr->push(-1);
+    // }
 
     return 0;
 }
 
-
-int PQReader::getTotalReadBuffers() const {
+int PQReader::getTotalReadBuffers() const
+{
     return totalReadBuffers;
 }
 
-bool PQReader::getFinishedReading() const {
+bool PQReader::getFinishedReading() const
+{
     return finishedReading;
 }
