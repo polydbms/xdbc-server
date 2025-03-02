@@ -14,18 +14,21 @@
 // #define TUPLE_SIZE 48
 // #define SLEEP_TIME 5ms
 
-struct Part {
+struct Part
+{
     int id;
     int startOff;
     long endOff;
 };
 
-struct SchemaAttribute {
+struct SchemaAttribute
+{
     std::string name;
     std::string tpe;
     int size;
 };
-struct ProfilingTimestamps {
+struct ProfilingTimestamps
+{
     std::chrono::high_resolution_clock::time_point timestamp;
     int thread;
     std::string component;
@@ -35,12 +38,14 @@ typedef std::shared_ptr<customQueue<int>> FBQ_ptr;
 typedef std::shared_ptr<customQueue<Part>> FPQ_ptr;
 typedef std::shared_ptr<customQueue<ProfilingTimestamps>> PTQ_ptr;
 
-struct transfer_details {
+struct transfer_details
+{
     float elapsed_time = 0.0f; // Default value for elapsed_time
     std::tuple<size_t, size_t, size_t, size_t> latest_queueSizes;
 };
 
-struct RuntimeEnv {
+struct RuntimeEnv
+{
     long transfer_id;
     std::string compression_algorithm;
     int iformat;
@@ -77,7 +82,7 @@ struct RuntimeEnv {
     int profilingInterval;
 
     int spawn_source;
-    std::atomic<int> enable_updation;
+    std::atomic<int> enable_updation = 0;
     transfer_details tf_paras;
     int max_threads = 16;
     EnvironmentManager env_manager;
@@ -85,7 +90,8 @@ struct RuntimeEnv {
     PTQ_ptr pts;
 };
 
-class DataSource {
+class DataSource
+{
 public:
     DataSource(RuntimeEnv &xdbcEnv, std::string tableName);
 
