@@ -1,6 +1,7 @@
 #ifndef XDBCSERVER_H
 #define XDBCSERVER_H
 
+
 #include <boost/asio/basic_stream_socket.hpp>
 #include <boost/asio.hpp>
 #include <boost/bind/bind.hpp>
@@ -14,8 +15,7 @@ using namespace boost::asio;
 using ip::tcp;
 
 constexpr size_t MAX_ATTRIBUTES = 230;
-struct Header
-{
+struct Header {
 
     size_t compressionType;
     size_t totalSize;
@@ -25,10 +25,10 @@ struct Header
     size_t crc;
     size_t attributeSize[MAX_ATTRIBUTES];
     size_t attributeComp[MAX_ATTRIBUTES];
+
 };
 
-class XDBCServer
-{
+class XDBCServer {
 public:
     explicit XDBCServer(RuntimeEnv &env);
 
@@ -46,4 +46,5 @@ private:
     void monitorQueues();
 };
 
-#endif // XDBCSERVER_H
+
+#endif //XDBCSERVER_H
