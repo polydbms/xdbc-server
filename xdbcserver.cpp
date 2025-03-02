@@ -250,7 +250,7 @@ int XDBCServer::send(int thr, DataSource &dataReader)
 
 int XDBCServer::serve()
 {
-	xdbcEnv->env_manager1.start();
+	xdbcEnv->env_manager_xServer.start();
 	boost::asio::io_context ioContext;
 	boost::asio::ip::tcp::acceptor acceptor(ioContext,
 											boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 1234));
@@ -325,8 +325,8 @@ int XDBCServer::serve()
 	compressorPtr = std::make_unique<Compressor>(*xdbcEnv);
 
 	//*** Create threads for compress operation
-	xdbcEnv->env_manager1.registerOperation("compress", [&](int thr)
-											{ try {
+	xdbcEnv->env_manager_xServer.registerOperation("compress", [&](int thr)
+												   { try {
 	if (thr >= xdbcEnv->max_threads) {
 	spdlog::get("XDBC.SERVER")->error("No of threads exceed limit");
 	return;
@@ -338,14 +338,14 @@ int XDBCServer::serve()
 	spdlog::get("XDBC.SERVER")->error("Unknown exception in thread {}", thr);
 	} }, xdbcEnv->compBufferPtr);
 
-	xdbcEnv->env_manager1.configureThreads("compress", xdbcEnv->compression_parallelism); // start compress component threads
+	xdbcEnv->env_manager_xServer.configureThreads("compress", xdbcEnv->compression_parallelism); // start compress component threads
 	//*** Finish creating threads for compress operation
 
 	spdlog::get("XDBC.SERVER")->info("Created compress threads: {0} ", xdbcEnv->compression_parallelism);
 
 	//*** Create threads for send operation
-	xdbcEnv->env_manager1.registerOperation("send", [&](int thr)
-											{ try {
+	xdbcEnv->env_manager_xServer.registerOperation("send", [&](int thr)
+												   { try {
 	if (thr >= xdbcEnv->max_threads) {
 	spdlog::get("XDBC.SERVER")->error("No of threads exceed limit");
 	return;
@@ -357,7 +357,7 @@ int XDBCServer::serve()
 	spdlog::get("XDBC.SERVER")->error("Unknown exception in thread {}", thr);
 	} }, xdbcEnv->sendBufferPtr);
 
-	xdbcEnv->env_manager1.configureThreads("send", xdbcEnv->network_parallelism); // start send component threads
+	xdbcEnv->env_manager_xServer.configureThreads("send", xdbcEnv->network_parallelism); // start send component threads
 	//*** Finish creating threads for send operation
 
 	// check that sockets are ready
@@ -383,14 +383,15 @@ int XDBCServer::serve()
 	// spdlog::get("XDBC.SERVER")->info("Basesocket signaled with bytes: {0} ", bs);
 
 	// Join all the threads
-	xdbcEnv->env_manager1.joinThreads("compress");
-	xdbcEnv->env_manager1.configureThreads("send", 0);
-	xdbcEnv->env_manager1.joinThreads("send");
+	t1.join();
+	xdbcEnv->env_manager_xServer.configureThreads("compress", 0);
+	xdbcEnv->env_manager_xServer.joinThreads("compress");
+	xdbcEnv->env_manager_xServer.configureThreads("send", 0);
+	xdbcEnv->env_manager_xServer.joinThreads("send");
 
 	xdbcEnv->monitor.store(false);
 	_monitorThread.join();
 
-	t1.join();
 	boost::system::error_code ec;
 	baseSocket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
 	if (ec)
@@ -403,6 +404,6 @@ int XDBCServer::serve()
 	{
 		spdlog::get("XDBC.SERVER")->error("Base socket close error: {0}", ec.message());
 	}
-	xdbcEnv->env_manager1.stop(); // *** Stop Reconfigurration handler
+	xdbcEnv->env_manager_xServer.stop(); // *** Stop Reconfigurration handler
 	return 1;
 }
