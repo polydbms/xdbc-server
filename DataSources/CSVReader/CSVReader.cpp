@@ -131,7 +131,7 @@ void CSVReader::readData()
     int maxRowNum = wc(fileName.c_str());
     spdlog::get("XDBC.SERVER")->info("CSV line number: {0}", maxRowNum);
 
-    int partNum = xdbcEnv->read_parallelism;
+    int partNum = xdbcEnv->read_partitions;
     div_t partSizeDiv = div(maxRowNum, partNum);
 
     int partSize = partSizeDiv.quot;
@@ -227,7 +227,7 @@ void CSVReader::readData()
 
 int CSVReader::readCSV(int thr)
 {
-
+    xdbcEnv->activeReadThreads.fetch_add(1);
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "start"});
     // auto fileName = "/dev/shm/" + tableName + "_" + thrStrNum + ".csv";
     auto fileName = "/dev/shm/" + tableName + ".csv";
@@ -255,6 +255,7 @@ int CSVReader::readCSV(int thr)
 
     while (curPart.id != -1)
     {
+        spdlog::get("XDBC.SERVER")->info("Fetching partition {0}", curPart.id);
         // skip to our starting offset
         while (currentLine < curPart.startOff && std::getline(file, line))
         {
@@ -299,6 +300,7 @@ int CSVReader::readCSV(int thr)
             ++currentLine;
         }
         currentLine = 0;
+        file.seekg(0, std::ios::beg); // Reset file pointer to the beginning
 
         curPart = xdbcEnv->partPtr->pop();
     }
@@ -316,7 +318,8 @@ int CSVReader::readCSV(int thr)
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "end"});
 
     xdbcEnv->finishedReadThreads.fetch_add(1);
-    if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
+    xdbcEnv->activeReadThreads.fetch_add(-1);
+    if (xdbcEnv->activeReadThreads == 0)
     {
         xdbcEnv->enable_updation_DS = 0;
         xdbcEnv->enable_updation_xServe = 0;

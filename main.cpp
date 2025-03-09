@@ -195,11 +195,11 @@ void env_convert(RuntimeEnv &env, const nlohmann::json &env_json)
         // env.buffer_size = std::stoi(env_json.at("bufferSize").get<std::string>());
         // env.buffers_in_bufferpool = std::stoi(env_json.at("bufferpoolSize").get<std::string>()) / env_.buffer_size;
         // env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
-        // env.read_partitions = std::stoi(env_json.at("readPartitions").get<std::string>());
         // env.network_parallelism = std::stoi(env_json.at("netParallelism").get<std::string>());
 
         if (env.enable_updation_DS == 1)
         {
+            env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
             env.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
         }
         if (env.enable_updation_xServe == 1)

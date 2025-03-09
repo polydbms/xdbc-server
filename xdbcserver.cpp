@@ -65,6 +65,7 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
 
 	// initialize read thread status
 	xdbcEnv.finishedReadThreads.store(0);
+	xdbcEnv.activeReadThreads.store(0);
 
 	// initialize free queue
 	xdbcEnv.freeBufferPtr = std::make_shared<customQueue<int>>();
