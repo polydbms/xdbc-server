@@ -139,6 +139,7 @@ void CSVReader::readData()
     if (partSizeDiv.rem > 0)
         partSize++;
 
+    xdbcEnv->readPart_info.resize(partNum);
     for (int i = partNum - 1; i >= 0; i--)
     {
         Part p{};
@@ -148,15 +149,11 @@ void CSVReader::readData()
 
         if (i == partNum - 1)
             p.endOff = maxRowNum;
-
-        xdbcEnv->partPtr->push(p);
+        xdbcEnv->readPartPtr->push(i);
+        xdbcEnv->readPart_info[i] = p;
 
         spdlog::get("XDBC.SERVER")->info("Partition {0} [{1},{2}] pushed into queue", p.id, p.startOff, p.endOff);
     }
-
-    // final partition
-    Part fP{};
-    fP.id = -1;
 
     //*** Create threads for read operation
     xdbcEnv->env_manager_DS.registerOperation("read", [&](int thr)
@@ -165,13 +162,13 @@ void CSVReader::readData()
     spdlog::get("XDBC.SERVER")->error("No of threads exceed limit");
     return;
     }
-    xdbcEnv->partPtr->push(fP);
+    xdbcEnv->readPartPtr->push(-1);
     readCSV(thr);
     } catch (const std::exception& e) {
     spdlog::get("XDBC.SERVER")->error("Exception in thread {}: {}", thr, e.what());
     } catch (...) {
     spdlog::get("XDBC.SERVER")->error("Unknown exception in thread {}", thr);
-    } }, xdbcEnv->freeBufferPtr);
+    } }, xdbcEnv->readPartPtr);
     xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism); // start read component threads
     //*** Finish creating threads for read operation
 
@@ -201,6 +198,7 @@ void CSVReader::readData()
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         xdbcEnv->env_manager_DS.configureThreads("deserialize", xdbcEnv->deser_parallelism);
+        xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism);
     }
     // Wait for read to finish and then kill deserialize
     xdbcEnv->env_manager_DS.joinThreads("read");
@@ -243,7 +241,8 @@ int CSVReader::readCSV(int thr)
     int curBid = xdbcEnv->freeBufferPtr->pop();
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
 
-    Part curPart = xdbcEnv->partPtr->pop();
+    int part_id = xdbcEnv->readPartPtr->pop();
+    Part curPart;
 
     std::string line;
     int currentLine = 0;
@@ -253,8 +252,9 @@ int CSVReader::readCSV(int thr)
     size_t tuplesRead = 0;
     size_t tuplesWritten = 0;
 
-    while (curPart.id != -1)
+    while (part_id != -1)
     {
+        curPart = xdbcEnv->readPart_info[part_id];
         spdlog::get("XDBC.SERVER")->info("Fetching partition {0}", curPart.id);
         // skip to our starting offset
         while (currentLine < curPart.startOff && std::getline(file, line))
@@ -301,8 +301,7 @@ int CSVReader::readCSV(int thr)
         }
         currentLine = 0;
         file.seekg(0, std::ios::beg); // Reset file pointer to the beginning
-
-        curPart = xdbcEnv->partPtr->pop();
+        part_id = xdbcEnv->readPartPtr->pop();
     }
 
     Header head{};
