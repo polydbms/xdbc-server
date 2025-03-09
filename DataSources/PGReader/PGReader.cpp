@@ -227,8 +227,6 @@ int PGReader::read_pq_copy()
     while (xdbcEnv->enable_updation_DS == 1) // Reconfigure threads as long as it is allowed
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism);
-        xdbcEnv->env_manager_DS.configureThreads("deserialize", xdbcEnv->deser_parallelism);
     }
 
     // Wait for read to finish and then kill deserialize
