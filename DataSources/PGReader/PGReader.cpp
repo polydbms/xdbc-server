@@ -168,6 +168,7 @@ int PGReader::read_pq_copy()
     if (partSizeDiv.rem > 0)
         partSize++;
 
+    xdbcEnv->readPart_info.resize(partNum);
     for (int i = partNum - 1; i >= 0; i--)
     {
         Part p{};
@@ -178,14 +179,11 @@ int PGReader::read_pq_copy()
         if (i == partNum - 1)
             p.endOff = UINT32_MAX;
 
-        xdbcEnv->partPtr->push(p);
+        xdbcEnv->readPartPtr->push(i);
+        xdbcEnv->readPart_info[i] = p;
 
         spdlog::get("XDBC.SERVER")->info("Partition {0} [{1},{2}] pushed into queue ", p.id, p.startOff, p.endOff);
     }
-
-    // final partition
-    Part fP{};
-    fP.id = -1;
 
     //*** Create threads for read operation
     xdbcEnv->env_manager_DS.registerOperation("read", [&](int thr)
@@ -194,13 +192,13 @@ int PGReader::read_pq_copy()
     spdlog::get("XDBC.SERVER")->error("No of threads exceed limit");
     return;
     }
-    xdbcEnv->partPtr->push(fP);
+    xdbcEnv->readPartPtr->push(-1);
     readPG(thr);
     } catch (const std::exception& e) {
     spdlog::get("XDBC.SERVER")->error("Exception in thread {}: {}", thr, e.what());
     } catch (...) {
     spdlog::get("XDBC.SERVER")->error("Unknown exception in thread {}", thr);
-    } }, xdbcEnv->freeBufferPtr);
+    } }, xdbcEnv->readPartPtr);
     xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism); // start read component threads
     //*** Finish creating threads for read operation
 
@@ -229,6 +227,7 @@ int PGReader::read_pq_copy()
     while (xdbcEnv->enable_updation_DS == 1) // Reconfigure threads as long as it is allowed
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism);
         xdbcEnv->env_manager_DS.configureThreads("deserialize", xdbcEnv->deser_parallelism);
     }
 
@@ -259,7 +258,6 @@ int PGReader::read_pq_copy()
 
 int PGReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers)
 {
-
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "deser", "start"});
 
     int outBid;
@@ -421,13 +419,14 @@ int PGReader::deserializePG(int thr, int &totalThreadWrittenTuples, int &totalTh
 
 int PGReader::readPG(int thr)
 {
-
+    xdbcEnv->activeReadThreads.fetch_add(1);
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "start"});
 
     int curBid = xdbcEnv->freeBufferPtr->pop();
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
 
-    Part curPart = xdbcEnv->partPtr->pop();
+    int part_id = xdbcEnv->readPartPtr->pop();
+    Part curPart;
 
     std::byte *writePtr = bp[curBid].data() + sizeof(Header);
     size_t sizeWritten = 0;
@@ -443,9 +442,9 @@ int PGReader::readPG(int thr)
     conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
     connection = PQconnectdb(conninfo);
 
-    while (curPart.id != -1)
+    while (part_id != -1)
     {
-
+        curPart = xdbcEnv->readPart_info[part_id];
         char *receiveBuffer = NULL;
         int receiveLength = 0;
         const int asynchronous = 0;
@@ -502,7 +501,7 @@ int PGReader::readPG(int thr)
             tuplesPerBuffer++;
         }
 
-        curPart = xdbcEnv->partPtr->pop();
+        part_id = xdbcEnv->readPartPtr->pop();
         spdlog::get("XDBC.SERVER")->info("PG thread {0}: Exiting PQgetCopyData loop, tupleNo: {1}", thr, tuplesRead);
 
         // we now check the last received length returned by copy data
@@ -556,7 +555,8 @@ int PGReader::readPG(int thr)
     xdbcEnv->deserBufferPtr->push(curBid);
 
     xdbcEnv->finishedReadThreads.fetch_add(1);
-    if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
+    xdbcEnv->activeReadThreads.fetch_add(-1);
+    if (xdbcEnv->activeReadThreads == 0)
     {
         xdbcEnv->enable_updation_DS = 0;
         xdbcEnv->enable_updation_xServe = 0;
