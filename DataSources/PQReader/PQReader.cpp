@@ -41,6 +41,7 @@ void PQReader::readData()
     if (partSizeDiv.rem > 0)
         partSize++;
 
+    xdbcEnv->readPart_info.resize(partNum);
     for (int i = partNum - 1; i >= 0; i--)
     {
         Part p{};
@@ -51,14 +52,11 @@ void PQReader::readData()
         if (i == partNum - 1)
             p.endOff = numFiles;
 
-        xdbcEnv->partPtr->push(p);
+        xdbcEnv->readPartPtr->push(i);
+        xdbcEnv->readPart_info[i] = p;
 
         spdlog::get("XDBC.SERVER")->info("Partition {0} [{1},{2}] pushed into queue", p.id, p.startOff, p.endOff);
     }
-
-    // final partition
-    Part fP{};
-    fP.id = -1;
 
     //*** Create threads for read operation
     xdbcEnv->env_manager_DS.registerOperation("read", [&](int thr)
@@ -67,13 +65,13 @@ void PQReader::readData()
     spdlog::get("XDBC.SERVER")->error("No of threads exceed limit");
     return;
     }
-    xdbcEnv->partPtr->push(fP);
+    xdbcEnv->readPartPtr->push(-1);
     readPQ(thr);
     } catch (const std::exception& e) {
     spdlog::get("XDBC.SERVER")->error("Exception in thread {}: {}", thr, e.what());
     } catch (...) {
     spdlog::get("XDBC.SERVER")->error("Unknown exception in thread {}", thr);
-    } }, xdbcEnv->freeBufferPtr);
+    } }, xdbcEnv->readPartPtr);
     xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism); // start read component threads
     //*** Finish creating threads for read operation
 
@@ -102,6 +100,7 @@ void PQReader::readData()
     while (xdbcEnv->enable_updation_DS == 1) // Reconfigure threads as long as it is allowed
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism);
         xdbcEnv->env_manager_DS.configureThreads("deserialize", xdbcEnv->deser_parallelism);
     }
 
@@ -362,16 +361,17 @@ int PQReader::deserializePQ(int thr, int &totalThreadWrittenTuples, int &totalTh
 
 int PQReader::readPQ(int thr)
 {
-
+    xdbcEnv->activeReadThreads.fetch_add(1);
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "start"});
 
     // Base directory containing the split Parquet files
     auto baseDir = "/dev/shm/" + tableName + "/";
-
+    int part_id = xdbcEnv->readPartPtr->pop();
     // Fetch the next partition to process
-    Part curPart = xdbcEnv->partPtr->pop();
-    while (curPart.id != -1)
+    Part curPart;
+    while (part_id != -1)
     {
+        curPart = xdbcEnv->readPart_info[part_id];
         // Iterate over the range of partitions
         for (int partitionId = curPart.startOff; partitionId < curPart.endOff; ++partitionId)
         {
@@ -425,12 +425,13 @@ int PQReader::readPQ(int thr)
         }
 
         // Fetch the next partition
-        curPart = xdbcEnv->partPtr->pop();
+        xdbcEnv->readPartPtr->pop();
     }
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "end"});
 
     xdbcEnv->finishedReadThreads.fetch_add(1);
-    if (xdbcEnv->finishedReadThreads == xdbcEnv->read_parallelism)
+    xdbcEnv->activeReadThreads.fetch_add(-1);
+    if (xdbcEnv->activeReadThreads == 0)
     {
         xdbcEnv->enable_updation_DS = 0;
         xdbcEnv->enable_updation_xServe = 0;
