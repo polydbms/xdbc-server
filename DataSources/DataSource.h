@@ -72,7 +72,9 @@ struct RuntimeEnv
     FBQ_ptr compBufferPtr;
     FBQ_ptr sendBufferPtr;
     FPQ_ptr partPtr;
+    FBQ_ptr readPartPtr;
 
+    std::vector<Part> readPart_info;
     std::vector<std::vector<std::byte>> *bpPtr;
     std::string system;
     std::vector<SchemaAttribute> schema;

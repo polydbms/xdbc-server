@@ -67,8 +67,9 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
 	xdbcEnv.finishedReadThreads.store(0);
 	xdbcEnv.activeReadThreads.store(0);
 
-	// initialize free queue
+	// initialize free queue and partition queue
 	xdbcEnv.freeBufferPtr = std::make_shared<customQueue<int>>();
+	xdbcEnv.readPartPtr = std::make_shared<customQueue<int>>();
 
 	// initially all buffers are put in the free buffer queue
 	for (int i = 0; i < xdbcEnv.buffers_in_bufferpool; i++)
