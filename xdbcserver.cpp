@@ -392,7 +392,6 @@ int XDBCServer::serve()
 	while (xdbcEnv->enable_updation_xServe == 1) // Reconfigure threads as long as it is allowed
 	{
 		std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-		xdbcEnv->env_manager_xServer.configureThreads("compress", xdbcEnv->compression_parallelism);
 	}
 	// Join all the threads
 	t1.join();

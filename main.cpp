@@ -201,10 +201,13 @@ void env_convert(RuntimeEnv &env, const nlohmann::json &env_json)
         {
             env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
             env.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
+            env.env_manager_DS.configureThreads("deserialize", env.deser_parallelism);
+            env.env_manager_DS.configureThreads("read", env.read_parallelism);
         }
         if (env.enable_updation_xServe == 1)
         {
             env.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
+            env.env_manager_xServer.configureThreads("compress", env.compression_parallelism);
         }
     }
     catch (const std::exception &e)
