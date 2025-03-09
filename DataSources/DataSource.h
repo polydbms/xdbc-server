@@ -61,6 +61,7 @@ struct RuntimeEnv
     int compression_parallelism;
     bool skip_deserializer;
 
+    std::atomic<int> activeReadThreads;
     std::atomic<int> finishedReadThreads;
     std::atomic<int> finishedDeserThreads;
     std::atomic<int> finishedCompThreads;
