@@ -425,7 +425,7 @@ int PQReader::readPQ(int thr)
         }
 
         // Fetch the next partition
-        xdbcEnv->readPartPtr->pop();
+        part_id = xdbcEnv->readPartPtr->pop();
     }
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "end"});
 
