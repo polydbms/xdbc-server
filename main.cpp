@@ -181,10 +181,13 @@ nlohmann::json additional_msg(RuntimeEnv &env)
 {
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     metrics_json["totalTime_ms"] = env.tf_paras.elapsed_time;
-    metrics_json["readBufferQ_load"] = std::get<0>(env.tf_paras.latest_queueSizes);
-    metrics_json["deserializedBufferQ_load"] = std::get<1>(env.tf_paras.latest_queueSizes);
-    metrics_json["compressedBufferQ_load"] = std::get<2>(env.tf_paras.latest_queueSizes);
-    metrics_json["sendBufferQ_load"] = std::get<3>(env.tf_paras.latest_queueSizes);
+    if (env.enable_updation_DS == 1)
+    {
+        metrics_json["readBufferQ_load"] = std::get<0>(env.tf_paras.latest_queueSizes);
+        metrics_json["deserializedBufferQ_load"] = std::get<1>(env.tf_paras.latest_queueSizes);
+        metrics_json["compressedBufferQ_load"] = std::get<2>(env.tf_paras.latest_queueSizes);
+        metrics_json["sendBufferQ_load"] = std::get<3>(env.tf_paras.latest_queueSizes);
+    }
     return metrics_json;
 }
 
