@@ -33,7 +33,7 @@ void PQReader::readData()
 
     spdlog::get("XDBC.SERVER")->info("Parquet files: {0}", numFiles);
 
-    int partNum = xdbcEnv->read_parallelism;
+    int partNum = xdbcEnv->read_partitions;
     div_t partSizeDiv = div(numFiles, partNum);
 
     int partSize = partSizeDiv.quot;

@@ -160,7 +160,7 @@ int PGReader::read_pq_copy()
 
     int maxRowNum = getMaxCtId(tableName);
 
-    int partNum = xdbcEnv->read_parallelism;
+    int partNum = xdbcEnv->read_partitions;
     div_t partSizeDiv = div(maxRowNum, partNum);
 
     int partSize = partSizeDiv.quot;
@@ -228,7 +228,9 @@ int PGReader::read_pq_copy()
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
     }
-
+    std::this_thread::sleep_for(std::chrono::milliseconds(30000));
+    xdbcEnv->read_parallelism = 4;
+    xdbcEnv->env_manager_DS.configureThreads("read", xdbcEnv->read_parallelism); // start read component threads
     // Wait for read to finish and then kill deserialize
     xdbcEnv->env_manager_DS.joinThreads("read");
     xdbcEnv->env_manager_DS.configureThreads("deserialize", 0);
@@ -424,6 +426,7 @@ int PGReader::readPG(int thr)
     xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "read", "pop"});
 
     int part_id = xdbcEnv->readPartPtr->pop();
+    spdlog::get("XDBC.SERVER")->info("Read Thread {0} partition {1}", thr, part_id);
     Part curPart;
 
     std::byte *writePtr = bp[curBid].data() + sizeof(Header);
@@ -442,6 +445,7 @@ int PGReader::readPG(int thr)
 
     while (part_id != -1)
     {
+        spdlog::get("XDBC.SERVER")->info("Read Thread {0} partition {1} time ", thr, part_id);
         curPart = xdbcEnv->readPart_info[part_id];
         char *receiveBuffer = NULL;
         int receiveLength = 0;
