@@ -155,9 +155,8 @@ nlohmann::json metrics_convert(RuntimeEnv &env)
 
     if ((env.pts) && (env.enable_updation_DS == 1) && (env.enable_updation_xServe == 1))
     {
-        std::vector<ProfilingTimestamps> env_pts;
-        env_pts = env.pts->copy_newElements();
-        auto component_metrics_ = calculate_metrics(env_pts, env.buffer_size);
+        auto &env_pts = *(env.pts);
+        auto component_metrics_ = calculate_metrics(env_pts, env.buffer_size, true);
 
         for (const auto &pair : component_metrics_)
         {
@@ -254,11 +253,9 @@ int main(int argc, char *argv[])
     xdbcEnv.tf_paras.elapsed_time = static_cast<float>(total_time);
     spdlog::get("XDBC.SERVER")->info("Total elapsed time: {} ms", total_time);
 
-    auto pts = std::vector<ProfilingTimestamps>(xdbcEnv.pts->size());
-    while (xdbcEnv.pts->size() != 0)
-        pts.push_back(xdbcEnv.pts->pop());
+    auto &env_pts = *(xdbcEnv.pts);
+    auto component_metrics = calculate_metrics(env_pts, xdbcEnv.buffer_size);
 
-    auto component_metrics = calculate_metrics(pts, xdbcEnv.buffer_size);
     std::ostringstream totalTimes;
     std::ostringstream procTimes;
     std::ostringstream waitingTimes;
