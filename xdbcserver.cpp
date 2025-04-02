@@ -70,7 +70,7 @@ XDBCServer::XDBCServer(RuntimeEnv &xdbcEnv)
 	// initialize free queue and partition queue
 	xdbcEnv.freeBufferPtr = std::make_shared<customQueue<int>>();
 	xdbcEnv.readPartPtr = std::make_shared<customQueue<int>>();
-
+	xdbcEnv.freeBufferPtr->setCapacity(xdbcEnv.buffers_in_bufferpool);
 	// initially all buffers are put in the free buffer queue
 	for (int i = 0; i < xdbcEnv.buffers_in_bufferpool; i++)
 		xdbcEnv.freeBufferPtr->push(i);
@@ -150,10 +150,20 @@ void XDBCServer::monitorQueues()
 		size_t compressedBufferTotalSize = xdbcEnv->compBufferPtr->size();
 		size_t sendBufferTotalSize = xdbcEnv->sendBufferPtr->size();
 
+		float readBufferLoadFloat = (readBufferTotalSize * 100.0f) / xdbcEnv->freeBufferPtr->getCapacity();
+		float deserBufferLoadFloat = (deserBufferTotalSize * 100.0f) / xdbcEnv->deserBufferPtr->getCapacity();
+		float compressedBufferLoadFloat = (compressedBufferTotalSize * 100.0f) / xdbcEnv->compBufferPtr->getCapacity();
+		float sendBufferLoadFLoat = (sendBufferTotalSize * 100.0f) / xdbcEnv->sendBufferPtr->getCapacity();
+
+		size_t readBufferLoad = static_cast<size_t>(readBufferLoadFloat);
+		size_t deserBufferLoad = static_cast<size_t>(deserBufferLoadFloat);
+		size_t compressedBufferLoad = static_cast<size_t>(compressedBufferLoadFloat);
+		size_t sendBufferLoad = static_cast<size_t>(sendBufferLoadFLoat);
+
 		// Store the measurement as a tuple
 		xdbcEnv->queueSizes.emplace_back(curTimeInterval, readBufferTotalSize, deserBufferTotalSize,
 										 compressedBufferTotalSize, sendBufferTotalSize);
-		xdbcEnv->tf_paras.latest_queueSizes = std::make_tuple(readBufferTotalSize, deserBufferTotalSize, compressedBufferTotalSize, sendBufferTotalSize);
+		xdbcEnv->tf_paras.latest_queueSizes = std::make_tuple(readBufferLoad, deserBufferLoad, compressedBufferLoad, sendBufferLoad);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(xdbcEnv->profilingInterval));
 		curTimeInterval += xdbcEnv->profilingInterval / 1000;
