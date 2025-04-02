@@ -163,8 +163,7 @@ void XDBCServer::monitorQueues()
 		// Store the measurement as a tuple
 		xdbcEnv->queueSizes.emplace_back(curTimeInterval, readBufferTotalSize, deserBufferTotalSize,
 										 compressedBufferTotalSize, sendBufferTotalSize);
-		xdbcEnv->tf_paras.latest_queueSizes = std::make_tuple(readBufferTotalSize, deserBufferTotalSize, compressedBufferTotalSize, sendBufferTotalSize);
-		xdbcEnv->tf_paras.latest_queueSizes = std::make_tuple(readBufferTotalSize, deserBufferTotalSize, compressedBufferTotalSize, sendBufferTotalSize);
+		xdbcEnv->tf_paras.latest_queueSizes = std::make_tuple(readBufferLoad, deserBufferLoad, compressedBufferLoad, sendBufferLoad);
 
 		std::this_thread::sleep_for(std::chrono::milliseconds(xdbcEnv->profilingInterval));
 		curTimeInterval += xdbcEnv->profilingInterval / 1000;
