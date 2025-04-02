@@ -153,10 +153,17 @@ nlohmann::json metrics_convert(RuntimeEnv &env)
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     // auto env_pts = env->pts->copyAll();
 
+<<<<<<< HEAD
     if ((env.pts) && (env.enable_updation_DS == 1) && (env.enable_updation_xServe == 1))
     {
         auto &env_pts = *(env.pts);
         auto component_metrics_ = calculate_metrics(env_pts, env.buffer_size, true);
+=======
+    if ((env.pts) && (env.enable_updation_DS == 1) && (env.enable_updation_xServe == 1)) {
+        std::vector<ProfilingTimestamps> env_pts;
+        env_pts = env.pts->copy_newElements();
+        auto component_metrics_ = calculate_metrics(env_pts, env.buffer_size);
+>>>>>>> main
 
         for (const auto &pair : component_metrics_)
         {
@@ -180,8 +187,12 @@ nlohmann::json additional_msg(RuntimeEnv &env)
 {
     nlohmann::json metrics_json = nlohmann::json::object(); // Use a JSON object
     metrics_json["totalTime_ms"] = env.tf_paras.elapsed_time;
+<<<<<<< HEAD
     if (env.enable_updation_DS == 1)
     {
+=======
+    if ((env.enable_updation_DS == 1) && (env.enable_updation_xServe == 1)) {
+>>>>>>> main
         metrics_json["readBufferQ_load"] = std::get<0>(env.tf_paras.latest_queueSizes);
         metrics_json["deserializedBufferQ_load"] = std::get<1>(env.tf_paras.latest_queueSizes);
         metrics_json["compressedBufferQ_load"] = std::get<2>(env.tf_paras.latest_queueSizes);
@@ -190,24 +201,37 @@ nlohmann::json additional_msg(RuntimeEnv &env)
     return metrics_json;
 }
 
+<<<<<<< HEAD
 void env_convert(RuntimeEnv &env, const nlohmann::json &env_json)
 {
     try
     {
+=======
+void env_convert(RuntimeEnv &env, const nlohmann::json &env_json) {
+    try {
+>>>>>>> main
         // env.buffer_size = std::stoi(env_json.at("bufferSize").get<std::string>());
         // env.buffers_in_bufferpool = std::stoi(env_json.at("bufferpoolSize").get<std::string>()) / env_.buffer_size;
         // env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
         // env.network_parallelism = std::stoi(env_json.at("netParallelism").get<std::string>());
 
+<<<<<<< HEAD
         if (env.enable_updation_DS == 1)
         {
+=======
+        if (env.enable_updation_DS == 1) {
+>>>>>>> main
             env.read_parallelism = std::stoi(env_json.at("readParallelism").get<std::string>());
             env.deser_parallelism = std::stoi(env_json.at("deserParallelism").get<std::string>());
             env.env_manager_DS.configureThreads("deserialize", env.deser_parallelism);
             env.env_manager_DS.configureThreads("read", env.read_parallelism);
         }
+<<<<<<< HEAD
         if (env.enable_updation_xServe == 1)
         {
+=======
+        if (env.enable_updation_xServe == 1) {
+>>>>>>> main
             env.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
             env.env_manager_xServer.configureThreads("compress", env.compression_parallelism);
         }
