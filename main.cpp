@@ -208,6 +208,7 @@ void env_convert(RuntimeEnv &env, const nlohmann::json &env_json)
         }
         if (env.enable_updation_xServe == 1)
         {
+            env.compression_algorithm = env_json.at("compressionType").get<std::string>();
             env.compression_parallelism = std::stoi(env_json.at("compParallelism").get<std::string>());
             env.env_manager_xServer.configureThreads("compress", env.compression_parallelism);
         }

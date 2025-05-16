@@ -34,7 +34,9 @@ void Compressor::compress(int thr, const std::string &compName)
 
         xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "pop"});
 
-        if (!Compressor::getCompId(xdbcEnv->compression_algorithm))
+        std::string comp_alg = xdbcEnv->compression_algorithm;
+
+        if (!Compressor::getCompId(comp_alg))
         {
             // nothing to do, forward buffer
             xdbcEnv->pts->push(ProfilingTimestamps{std::chrono::high_resolution_clock::now(), thr, "comp", "push"});
@@ -47,14 +49,14 @@ void Compressor::compress(int thr, const std::string &compName)
             outBufferId = xdbcEnv->freeBufferPtr->pop();
             // TODO: replace function with a hashmap or similar
             // 0 nocomp, 1 zstd, 2 snappy, 3 lzo, 4 lz4, 5 zlib, 6 cols
-            size_t compId = Compressor::getCompId(xdbcEnv->compression_algorithm);
+            size_t compId = Compressor::getCompId(comp_alg);
 
             // spdlog::get("XDBC.SERVER")->warn("Send thread {0} entering compression", thr);
             auto headIn = reinterpret_cast<Header *>(bp[inBufferId].data());
 
             auto decompressedPtr = bp[inBufferId].data() + sizeof(Header);
             std::array<size_t, MAX_ATTRIBUTES> compressed_sizes = Compressor::compress_buffer(
-                xdbcEnv->compression_algorithm, decompressedPtr, bp[outBufferId].data() + sizeof(Header),
+                comp_alg, decompressedPtr, bp[outBufferId].data() + sizeof(Header),
                 headIn->totalSize,
                 xdbcEnv->tuples_per_buffer, xdbcEnv->schema);
 
