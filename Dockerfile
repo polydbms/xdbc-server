@@ -24,7 +24,7 @@ RUN apt install -qy libzstd-dev liblzo2-dev liblz4-dev libsnappy-dev libbrotli-d
 
 #RUN git clone https://github.com/LLNL/zfp.git && cd zfp && make
 
-RUN git clone https://github.com/lemire/FastPFor.git && cd FastPFor && \
+RUN git clone https://github.com/lemire/FastPFor.git && cd FastPFor && git checkout 039134b && \
     mkdir build && \
     cd build && \
     cmake .. && \
