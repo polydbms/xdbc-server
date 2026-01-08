@@ -130,7 +130,7 @@ void handleCMDParams(int ac, char *av[], RuntimeEnv &env) {
 }
 
 
-int main(int argc, char *argv[]) {
+int xdbc_main(int argc, char *argv[]) {
 
     auto console = spdlog::stdout_color_mt("XDBC.SERVER");
 
@@ -220,4 +220,8 @@ int main(int argc, char *argv[]) {
     csv_file.close();
 
     return 0;
+}
+
+int main(int argc, char *argv[]) {
+    return xdbc_main(argc, argv);
 }
