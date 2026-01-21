@@ -97,7 +97,8 @@ int PGReader::getMaxCtId(const std::string &tableName) {
     const char *conninfo;
     PGconn *connection = NULL;
 
-    conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
+    // Use libpq environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER)
+    conninfo = "";
     connection = PQconnectdb(conninfo);
 
     PGresult *res;
@@ -388,7 +389,8 @@ int PGReader::readPG(int thr) {
     PGconn *connection = NULL;
     // TODO: attention! `hostAddr` is for IPs while `host` is for hostnames, handle correctly
     // TODO: remove hardcoded info
-    conninfo = "dbname = db1 user = postgres password = 123456 host = pg1 port = 5432";
+    // Use libpq environment variables (PGHOST, PGPORT, PGDATABASE, PGUSER)
+    conninfo = "";
     connection = PQconnectdb(conninfo);
 
     while (curPart.id != -1) {

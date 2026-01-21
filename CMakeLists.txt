@@ -60,6 +60,7 @@ SET(USED_LIBS ${Boost_SYSTEM_LIBRARY} ${Boost_THREAD_LIBRARY} ${Boost_PROGRAM_OP
 set(XDBC_LIB_SOURCES
     xdbcserver.cpp
     xdbc_c_api.cpp
+    config_reader.cpp
     Compression/Compressor.cpp
     DataSources/PGReader/PGReader.cpp
     DataSources/CHReader/CHReader.cpp
@@ -105,6 +106,7 @@ install(TARGETS xdbc-server-lib xdbc-server
 install(FILES 
     xdbcserver.h 
     xdbc_c_api.h
+    config_reader.h
     DataSources/DataSource.h
     customQueue.h
     DESTINATION include/xdbc-server
