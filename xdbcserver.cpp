@@ -164,9 +164,12 @@ int XDBCServer::send(int thr, DataSource &dataReader) {
     //spdlog::get("XDBC.SERVER")->info("Entered send thread: {0}", thr);
     int port = 1234 + thr + 1;
     boost::asio::io_context ioContext;
-    boost::asio::ip::tcp::acceptor listenerAcceptor(ioContext,
-                                                    boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(),
-                                                                                   port));
+    boost::asio::ip::tcp::acceptor listenerAcceptor(ioContext);
+    boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::tcp::v4(), port);
+    listenerAcceptor.open(endpoint.protocol());
+    listenerAcceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+    listenerAcceptor.bind(endpoint);
+    listenerAcceptor.listen();
     boost::asio::ip::tcp::socket socket(ioContext);
 
     //let main thread know socket is ready
@@ -248,8 +251,12 @@ int XDBCServer::serve() {
 
 
     boost::asio::io_context ioContext;
-    boost::asio::ip::tcp::acceptor acceptor(ioContext,
-                                            boost::asio::ip::tcp::endpoint(boost::asio::ip::tcp::v4(), 1234));
+    boost::asio::ip::tcp::acceptor acceptor(ioContext);
+    boost::asio::ip::tcp::endpoint endpoint(boost::asio::ip::tcp::v4(), 1234);
+    acceptor.open(endpoint.protocol());
+    acceptor.set_option(boost::asio::ip::tcp::acceptor::reuse_address(true));
+    acceptor.bind(endpoint);
+    acceptor.listen();
     boost::asio::ip::tcp::socket baseSocket(ioContext);
     acceptor.accept(baseSocket);
 
