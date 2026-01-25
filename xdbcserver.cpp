@@ -13,6 +13,7 @@
 #include "DataSources/CHReader/CHReader.h"
 #include "DataSources/CSVReader/CSVReader.h"
 #include "DataSources/PQReader/PQReader.h"
+#include "DataSources/SPIReader/SPIReader.h"
 #include "spdlog/spdlog.h"
 
 
@@ -295,6 +296,10 @@ int XDBCServer::serve() {
         ds = std::make_unique<CSVReader>(*xdbcEnv, tableName);
     } else if (xdbcEnv->system == "parquet") {
         ds = std::make_unique<PQReader>(*xdbcEnv, tableName);
+    } else if (xdbcEnv->system == "postgres_spi") {
+        ds = std::make_unique<SPIReader>(*xdbcEnv, tableName);
+        // Force parallelism to 1 for SPI since it's single-threaded
+        xdbcEnv->read_parallelism = 1;
     }
 
     xdbcEnv->tuple_size = std::accumulate(xdbcEnv->schema.begin(), xdbcEnv->schema.end(), 0,
@@ -313,11 +318,19 @@ int XDBCServer::serve() {
 
     _monitorThread = std::thread(&XDBCServer::monitorQueues, this);
 
-    t1 = std::thread([&ds]() {
-        ds->readData();
-    });
-
-    spdlog::get("XDBC.SERVER")->info("Created {0} read threads", xdbcEnv->system);
+    // For SPI, we must run readData on this thread (main thread)
+    // For others, we spawn a thread.
+    if (xdbcEnv->system == "postgres_spi") {
+         spdlog::get("XDBC.SERVER")->info("Running SPI read on main thread");
+         // Since readData is blocking, we need to spin up other threads first?
+         // Actually, below we spin up comp and net threads.
+         // We should spin them up BEFORE calling ds->readData().
+    } else {
+        t1 = std::thread([&ds]() {
+            ds->readData();
+        });
+        spdlog::get("XDBC.SERVER")->info("Created {0} read threads", xdbcEnv->system);
+    }
 
     std::unique_ptr<Compressor> compressorPtr;
     compressorPtr = std::make_unique<Compressor>(*xdbcEnv);
@@ -350,7 +363,10 @@ int XDBCServer::serve() {
         spdlog::get("XDBC.SERVER")->warn("Boost error while writing: ", error.message());
     }
 
-    //spdlog::get("XDBC.SERVER")->info("Basesocket signaled with bytes: {0} ", bs);
+    // If SPI, we run readData HERE, after everyone else is ready.
+    if (xdbcEnv->system == "postgres_spi") {
+        ds->readData();
+    }
 
 
     // Join all the threads
@@ -369,7 +385,7 @@ int XDBCServer::serve() {
     xdbcEnv->monitor.store(false);
     _monitorThread.join();
 
-    t1.join();
+    if (t1.joinable()) t1.join();
     boost::system::error_code ec;
     baseSocket.shutdown(boost::asio::ip::tcp::socket::shutdown_both, ec);
     if (ec) {

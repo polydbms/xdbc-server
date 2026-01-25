@@ -3,6 +3,7 @@
 #include "DataSources/DataSource.h"
 #include "spdlog/spdlog.h"
 #include "spdlog/sinks/stdout_color_sinks.h"
+#include "metrics_calculator.h"
 #include <string>
 #include <memory>
 #include <thread>
@@ -107,6 +108,10 @@ int xdbc_server_run(xdbc_server_t* server) {
     try {
         spdlog::get("XDBC.SERVER")->info("Starting XDBC Server...");
         int result = server->server->serve();
+
+        // Print Metrics (MOVED AFTER SERVE)
+        printAndReturnAverageLoad(server->env);
+        
         spdlog::get("XDBC.SERVER")->info("XDBC Server finished with result: {}", result);
         return result;
         
