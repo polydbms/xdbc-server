@@ -21,7 +21,6 @@ SPIReader::SPIReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
         totalReadBuffers(0),
         finishedReading(false),
         xdbcEnv(&xdbcEnv) {
-    std::cerr << "[SPIReader] SPI Constructor called with table " << tableName << std::endl;
 }
 
 int SPIReader::getTotalReadBuffers() const {
@@ -74,6 +73,10 @@ void SPIReader::readData() {
 int SPIReader::readSPI() {
     std::cerr << "[SPIReader] Starting SPI Read on main thread" << std::endl;
 
+    // CRITICAL FIX: Save current memory context to ensure clean state
+    // This prevents stale pointers from previous sessions in long-running worker
+    MemoryContext oldcontext = CurrentMemoryContext;
+
     // Connect to SPI
     int ret = SPI_connect();
     if (ret != SPI_OK_CONNECT) {
@@ -88,37 +91,66 @@ int SPIReader::readSPI() {
     
     std::cerr << "[SPIReader] Executing SPI Query: " << qStr << std::endl;
 
-    // Executing simple SPI_execute instead of cursor to verify stability
-    int res = SPI_execute(qStr.c_str(), true, 0); // read_only=true, limit=0 (all)
-    
-    if (res < 0) {
-        std::cerr << "[SPIReader] SPI_execute failed: " << res << std::endl;
+    // Prepare the query plan first
+    SPIPlanPtr plan = SPI_prepare(qStr.c_str(), 0, NULL);
+    if (plan == NULL) {
+        std::cerr << "[SPIReader] SPI_prepare failed" << std::endl;
         SPI_finish();
         return -1;
     }
     
-    long total_fetched = SPI_processed;
-    std::cerr << "[SPIReader] SPI_execute success. Processed: " << total_fetched << std::endl;
+    // Open cursor with the prepared plan
+    Portal portal = SPI_cursor_open(NULL, plan, NULL, NULL, true);
+    if (portal == NULL) {
+        std::cerr << "[SPIReader] SPI_cursor_open failed" << std::endl;
+        SPI_finish();
+        return -1;
+    }
+    
+    std::cerr << "[SPIReader] Cursor opened successfully" << std::endl;
 
+    long fetch_size = 10000; // adjustable batch size
+    bool more_data = true;
+    long total_fetched = 0;
+    
     int curBid = xdbcEnv->freeBufferPtr->pop();
+    
+    // CRITICAL FIX: Zero-initialize first buffer to prevent stale data
+    // from previous session causing memory corruption
+    std::memset(bp[curBid].data(), 0, bp[curBid].size());
+    
     Header *head = reinterpret_cast<Header *>(bp[curBid].data());
     char *writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
     size_t currentBufferUsed = 0;
-    
-    if (total_fetched > 0 && SPI_tuptable != NULL) {
-        for (uint64_t i = 0; i < total_fetched; i++) {
+
+    int batch_num = 0;
+    while (more_data) {
+        SPI_cursor_fetch(portal, true, fetch_size);
+        
+        if (SPI_processed == 0) {
+            more_data = false;
+            break;
+        }
+
+        // Save the tuple table pointer to a local variable immediately
+        // to avoid any issues with the global SPI_tuptable being modified
+        SPITupleTable *tuptable = SPI_tuptable;
+        uint64 processed = SPI_processed;
+
+        for (uint64_t i = 0; i < processed; i++) {
             std::string row_str = "";
-            for (int j = 1; j <= SPI_tuptable->tupdesc->natts; j++) {
-                char *val = SPI_getvalue(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, j);
+            for (int j = 1; j <= tuptable->tupdesc->natts; j++) {
+                char *val = SPI_getvalue(tuptable->vals[i], tuptable->tupdesc, j);
                 if (val) {
-                    row_str += val;
+                    row_str.append(val);
+                    pfree(val);
                 }
-                if (j < SPI_tuptable->tupdesc->natts) {
+                if (j < tuptable->tupdesc->natts) {
                     row_str += "|";
                 }
             }
             row_str += "\n";
-
+            
             // Check overflow
             if (currentBufferUsed + row_str.length() > (xdbcEnv->buffer_size * 1024)) {
                  head->totalSize = currentBufferUsed;
@@ -136,11 +168,17 @@ int SPIReader::readSPI() {
             currentBufferUsed += row_str.length();
         }
         
-        // SPI_freetuptable(SPI_tuptable); // Not needed if we finish? usually good practice
+        SPI_freetuptable(tuptable);
+        total_fetched += processed;
+        batch_num++;
     }
 
+    SPI_cursor_close(portal);
     SPI_finish();
-
+    
+    // CRITICAL FIX: Restore original memory context
+    // Ensures we don't leak into wrong context
+    MemoryContextSwitchTo(oldcontext);
 
     // Push last buffer
     if (currentBufferUsed > 0) {
@@ -161,130 +199,6 @@ int SPIReader::readSPI() {
     
     std::cerr << "[SPIReader] SPI Read finished. Total rows: " << total_fetched << std::endl;
     return total_fetched;
-    
-    /*
-    // Connect to SPI
-    int ret = SPI_connect();
-    if (ret != SPI_OK_CONNECT) {
-        spdlog::get("XDBC.SERVER")->error("SPI_connect failed: {0}", ret);
-        return -1;
-    }
-
-    // Prepare query: SELECT * FROM table
-    // Construct columns string
-    std::string cols = getAttributesAsStr(xdbcEnv->schema);
-    std::string qStr = "SELECT " + cols + " FROM " + tableName;
-    
-    spdlog::get("XDBC.SERVER")->info("Executing SPI Query: {0}", qStr);
-
-    // Open cursor to fetch incrementally
-    Portal portal = SPI_cursor_open_with_args(NULL, qStr.c_str(), 0, NULL, NULL, NULL, true, 0);
-    if (portal == NULL) {
-        spdlog::get("XDBC.SERVER")->error("SPI_cursor_open failed");
-        SPI_finish();
-        return -1;
-    }
-
-    long fetch_size = 10000; // adjustable batch size
-    bool more_data = true;
-    long total_fetched = 0;
-    
-    // We need to write data into buffers for deserializers to pick up.
-    // The format expected by deserializePG/SPI is pipe-delimited text.
-    // e.g. "1|name_1|1.5\n"
-    
-    int curBid = xdbcEnv->freeBufferPtr->pop();
-    Header *head = reinterpret_cast<Header *>(bp[curBid].data());
-    // std::byte *writePtr = bp[curBid].data() + sizeof(Header); // header size
-    char *writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
-    size_t currentBufferUsed = 0;
-    size_t tuplesInPacket = 0;
-
-    // We can reuse PGReader logic but adapted to SPI_getvalue
-    while (more_data) {
-        SPI_cursor_fetch(portal, true, fetch_size);
-        
-        if (SPI_processed == 0) {
-            more_data = false;
-            break;
-        }
-
-        for (uint64_t i = 0; i < SPI_processed; i++) {
-            std::string row_str = "";
-            for (int j = 1; j <= SPI_tuptable->tupdesc->natts; j++) {
-                char *val = SPI_getvalue(SPI_tuptable->vals[i], SPI_tuptable->tupdesc, j);
-                if (val) {
-                    row_str += val;
-                }
-                if (j < SPI_tuptable->tupdesc->natts) {
-                    row_str += "|";
-                }
-            }
-            row_str += "\n";
-            
-            // Check overflow
-            if (currentBufferUsed + row_str.length() > (xdbcEnv->buffer_size * 1024)) {
-                 // Push buffer
-                 head->totalSize = currentBufferUsed;
-                 head->totalTuples = 0; // The deserializer counts real tuples
-                 
-                 xdbcEnv->deserBufferPtr->push(curBid);
-                 
-                 // Get new buffer
-                 curBid = xdbcEnv->freeBufferPtr->pop();
-                 head = reinterpret_cast<Header *>(bp[curBid].data());
-                 writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
-                 currentBufferUsed = 0;
-            }
-
-            // Copy to buffer
-            memcpy(writePtr, row_str.c_str(), row_str.length());
-            writePtr += row_str.length();
-            currentBufferUsed += row_str.length();
-            
-            // Important: free SPI memory if needed, though SPI_getvalue returns palloc'd memory 
-            // created in the current memory context. Since we are in a loop, we might accumulate.
-            // But we are using a cursor so it might be per-fetch context.
-            // Standard SPI loop usually manages contexts.
-        }
-        
-        SPI_freetuptable(SPI_tuptable);
-        total_fetched += SPI_processed;
-    }
-
-    SPI_cursor_close(portal);
-    SPI_finish();
-
-    // Push last buffer
-    if (currentBufferUsed > 0) {
-         head->totalSize = currentBufferUsed;
-         head->totalTuples = 0;
-         xdbcEnv->deserBufferPtr->push(curBid);
-    } else {
-         // Return unused buffer
-         xdbcEnv->freeBufferPtr->push(curBid);
-    }
-
-    // Signal end to deserializers
-    xdbcEnv->finishedReadThreads.fetch_add(1); // 1 read thread (this one)
-    // We treat this as 1 "read thread" completing.
-    // If read_parallelism > 1, the other threads won't exist in SPI mode, so we rely on this count.
-    // Actually, xdbcEnv logic expects `finishedReadThreads == read_parallelism`.
-    // We should set read_parallelism to 1 in xdbcserver.cpp for SPI mode.
-    
-    // If read_parallelism is set to 1, this works.
-    if (xdbcEnv->read_parallelism <= 1) {
-        for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
-            xdbcEnv->deserBufferPtr->push(-1);
-    } else {
-        // Just force it?
-         for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
-            xdbcEnv->deserBufferPtr->push(-1);
-    }
-    
-    spdlog::get("XDBC.SERVER")->info("SPI Read finished. Total rows: {0}", total_fetched);
-    return total_fetched;
-    */
 }
 
 // Ensure we have the deserialize templates available
