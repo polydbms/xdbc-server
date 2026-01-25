@@ -66,11 +66,31 @@ set(XDBC_LIB_SOURCES
     DataSources/CHReader/CHReader.cpp
     DataSources/CSVReader/CSVReader.cpp
     DataSources/PQReader/PQReader.cpp
+    # DataSources/SPIReader/SPIReader.cpp REMOVED from main list
     DataSources/DataSource.cpp
 )
 
+# Postgres Headers
+execute_process(
+    COMMAND pg_config --includedir
+    OUTPUT_VARIABLE PG_INCLUDE_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+execute_process(
+    COMMAND pg_config --includedir-server
+    OUTPUT_VARIABLE PG_SERVER_INCLUDE_DIR
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+
+# Create Object Library for SPIReader to isolate includes
+add_library(spi_reader_obj OBJECT DataSources/SPIReader/SPIReader.cpp)
+target_include_directories(spi_reader_obj PRIVATE ${PG_INCLUDE_DIR} ${PG_SERVER_INCLUDE_DIR})
+# Ensure standard includes are also available if needed (e.g. current dir)
+target_include_directories(spi_reader_obj PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+
 # Build shared library
-add_library(xdbc-server-lib SHARED ${XDBC_LIB_SOURCES})
+add_library(xdbc-server-lib SHARED ${XDBC_LIB_SOURCES} $<TARGET_OBJECTS:spi_reader_obj>)
+target_include_directories(xdbc-server-lib PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}) 
 target_link_libraries(xdbc-server-lib PUBLIC 
     clickhouse-cpp-lib 
     -lpqxx -lpq 
@@ -95,6 +115,9 @@ set_target_properties(xdbc-server-lib PROPERTIES
 # Build executable
 add_executable(xdbc-server main.cpp)
 target_link_libraries(xdbc-server PRIVATE xdbc-server-lib)
+# Allow undefined symbols in shared libraries (for SPI symbols missing in standalone exe)
+target_link_options(xdbc-server PRIVATE -Wl,--allow-shlib-undefined)
+target_link_options(xdbc-server-lib PRIVATE -Wl,--allow-shlib-undefined)
 
 # Install rules
 install(TARGETS xdbc-server-lib xdbc-server
