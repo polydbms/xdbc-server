@@ -2,6 +2,7 @@
 #include <iostream>
 #include <thread>
 #include <cstring>
+#include <charconv>
 #include "spdlog/spdlog.h"
 #include "../../xdbcserver.h"
 
@@ -11,6 +12,7 @@ extern "C" {
 #include "executor/spi.h"
 #include "utils/builtins.h"
 #include "catalog/pg_type.h"
+#include "access/htup_details.h"
 }
 
 using namespace std;
@@ -123,6 +125,15 @@ int SPIReader::readSPI() {
     char *writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
     size_t currentBufferUsed = 0;
 
+    // Prepare Datum/Null arrays
+    int capacity_natts = 0;
+    Datum *values = nullptr;
+    bool *nulls = nullptr;
+    
+    // Reuse string buffer to avoid allocations per row
+    std::string row_str;
+    row_str.reserve(1024);
+
     int batch_num = 0;
     while (more_data) {
         SPI_cursor_fetch(portal, true, fetch_size);
@@ -132,20 +143,90 @@ int SPIReader::readSPI() {
             break;
         }
 
-        // Save the tuple table pointer to a local variable immediately
-        // to avoid any issues with the global SPI_tuptable being modified
+        // Save the tuple table pointer locally
         SPITupleTable *tuptable = SPI_tuptable;
         uint64 processed = SPI_processed;
+        TupleDesc tupdesc = tuptable->tupdesc;
+
+        // Ensure we have enough space for execution
+        if (tupdesc->natts > capacity_natts) {
+             if (values) pfree(values);
+             if (nulls) pfree(nulls);
+             capacity_natts = tupdesc->natts;
+             values = (Datum *) palloc(capacity_natts * sizeof(Datum));
+             nulls = (bool *) palloc(capacity_natts * sizeof(bool));
+        }
 
         for (uint64_t i = 0; i < processed; i++) {
-            std::string row_str = "";
-            for (int j = 1; j <= tuptable->tupdesc->natts; j++) {
-                char *val = SPI_getvalue(tuptable->vals[i], tuptable->tupdesc, j);
-                if (val) {
-                    row_str.append(val);
-                    pfree(val);
+            row_str.clear();
+            
+            // Deform tuple into Datums
+            heap_deform_tuple(tuptable->vals[i], tupdesc, values, nulls);
+            
+            for (int j = 0; j < tupdesc->natts; j++) {
+                if (nulls[j]) {
+                    // Null handling (print nothing, just separate)
+                } else {
+                     // Check type from Schema or TupDesc? 
+                     // Using xdbcEnv->schema serves as our "expected" type map.
+                     // We match j-th attribute to j-th schema entry.
+                     // (Assuming order matches query: SELECT * matches schema order)
+                     
+                     if (j < xdbcEnv->schema.size()) {
+                         char tpe = xdbcEnv->schema[j].tpe[0];
+                         
+                         if (tpe == 'I') { // Integer
+                             int32 val = DatumGetInt32(values[j]);
+                             char buf[32];
+                             auto res = std::to_chars(buf, buf + 32, val);
+                             if (res.ec == std::errc()) {
+                                 row_str.append(buf, res.ptr - buf);
+                             }
+                         } else if (tpe == 'D') { // Double
+                             float8 val = DatumGetFloat8(values[j]);
+                             char buf[64];
+                             #if __cpp_lib_to_chars >= 201611L
+                                 auto res = std::to_chars(buf, buf + 64, val);
+                                 if (res.ec == std::errc()) {
+                                     row_str.append(buf, res.ptr - buf);
+                                 }
+                             #else
+                                 int len = sprintf(buf, "%.15g", val);
+                                 row_str.append(buf, len);
+                             #endif
+                         } else if (tpe == 'S' || tpe == 'C') { // String/Char
+                             // Detoast if necessary
+                             struct varlena *v = (struct varlena *) DatumGetPointer(values[j]);
+                             
+                             // Need to handle detoasting safely
+                             struct varlena *detoasted = PG_DETOAST_DATUM_PACKED(values[j]);
+                             char *str_data = VARDATA_ANY(detoasted);
+                             int str_len = VARSIZE_ANY_EXHDR(detoasted);
+                             
+                             row_str.append(str_data, str_len);
+                             
+                             if ((void *)detoasted != (void *)v) {
+                                 pfree(detoasted);
+                             }
+                         } else {
+                             // Fallback
+                             char *val = SPI_getvalue(tuptable->vals[i], tupdesc, j + 1);
+                             if (val) {
+                                row_str.append(val);
+                                pfree(val);
+                             }
+                         }
+                     } else {
+                         // Schema mismatch or extra columns? Fallback
+                         char *val = SPI_getvalue(tuptable->vals[i], tupdesc, j + 1);
+                         if (val) {
+                            row_str.append(val);
+                            pfree(val);
+                         }
+                     }
                 }
-                if (j < tuptable->tupdesc->natts) {
+
+                if (j < tupdesc->natts - 1) {
                     row_str += "|";
                 }
             }
@@ -158,6 +239,10 @@ int SPIReader::readSPI() {
                  xdbcEnv->deserBufferPtr->push(curBid);
                  
                  curBid = xdbcEnv->freeBufferPtr->pop();
+                 // Memset only header + some safety? Memset full buffer is expensive?
+                 // Original code memset full buffer. Let's keep it for safety.
+                 // std::memset(bp[curBid].data(), 0, bp[curBid].size()); // Optional optimization: skip this if not strictly needed
+                 
                  head = reinterpret_cast<Header *>(bp[curBid].data());
                  writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
                  currentBufferUsed = 0;
@@ -172,6 +257,9 @@ int SPIReader::readSPI() {
         total_fetched += processed;
         batch_num++;
     }
+    
+    if (values) pfree(values);
+    if (nulls) pfree(nulls);
 
     SPI_cursor_close(portal);
     SPI_finish();
