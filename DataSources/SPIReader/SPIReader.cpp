@@ -23,6 +23,17 @@ SPIReader::SPIReader(RuntimeEnv &xdbcEnv, const std::string &tableName) :
         totalReadBuffers(0),
         finishedReading(false),
         xdbcEnv(&xdbcEnv) {
+    
+    // Initialize Blocking Queues with capacity
+    batchQueue = std::make_shared<customQueue<RawBatch*>>(10);       // Max 10 filled batches waiting
+    freeBatchQueue = std::make_shared<customQueue<RawBatch*>>(10);   // Max 10 free batches recycling
+    
+    // Pre-allocate pools
+    for(int i = 0; i < 10; ++i) {
+        RawBatch* b = new RawBatch();
+        batchPool.push_back(b);
+        freeBatchQueue->push(b);
+    }
 }
 
 int SPIReader::getTotalReadBuffers() const {
@@ -36,15 +47,11 @@ bool SPIReader::getFinishedReading() const {
 void SPIReader::readData() {
     auto start = std::chrono::steady_clock::now();
 
-    // In SPI mode, readData() is called directly on the main thread.
-    // However, deserialization can still happen in background threads.
-    
-    // Launch deserializer threads explicitly since we are "reading"
+    // Launch deserializer threads (Consumers of formatted buffers)
     std::vector<int> threadWrittenTuples(xdbcEnv->deser_parallelism, 0);
     std::vector<int> threadWrittenBuffers(xdbcEnv->deser_parallelism, 0);
     std::vector<std::thread> deSerThreads(xdbcEnv->deser_parallelism);
 
-    auto start_deser = std::chrono::steady_clock::now();
     for (int i = 0; i < xdbcEnv->deser_parallelism; i++) {
         deSerThreads[i] = std::thread(&SPIReader::deserializeSPI,
                                       this, i,
@@ -52,8 +59,16 @@ void SPIReader::readData() {
         );
     }
     
-    // Perform SPI reading on THIS thread (main thread)
+    // Launch Batch Processor Thread (Consumer of RawBatches)
+    // This thread performs formatting/serialization decoupled from SPI
+    std::thread consumerThread(&SPIReader::processBatches, this);
+    
+    // Perform SPI reading on THIS thread (Producer)
     int totalCnt = readSPI();
+
+    // Signal Consumer to finish
+    batchQueue->push(nullptr); // Sentinel
+    consumerThread.join();
 
     // Join deserializers
     int totalTuples = 0;
@@ -63,6 +78,12 @@ void SPIReader::readData() {
         totalTuples += threadWrittenTuples[i];
         totalBuffers += threadWrittenBuffers[i];
     }
+    
+    // Cleanup Pool
+    for(auto b : batchPool) {
+        delete b;
+    }
+    batchPool.clear();
 
     finishedReading.store(true);
 
@@ -74,81 +95,46 @@ void SPIReader::readData() {
 
 int SPIReader::readSPI() {
     std::cerr << "[SPIReader] Starting SPI Read on main thread" << std::endl;
-
-    // CRITICAL FIX: Save current memory context to ensure clean state
-    // This prevents stale pointers from previous sessions in long-running worker
+    
     MemoryContext oldcontext = CurrentMemoryContext;
+    if (SPI_connect() != SPI_OK_CONNECT) return -1;
 
-    // Connect to SPI
-    int ret = SPI_connect();
-    if (ret != SPI_OK_CONNECT) {
-        std::cerr << "[SPIReader] SPI_connect failed: " << ret << std::endl;
-        return -1;
-    }
-
-    // Prepare query: SELECT * FROM table
-    // Construct columns string
     std::string cols = getAttributesAsStr(xdbcEnv->schema);
     std::string qStr = "SELECT " + cols + " FROM " + tableName;
-    
-    std::cerr << "[SPIReader] Executing SPI Query: " << qStr << std::endl;
-
-    // Prepare the query plan first
     SPIPlanPtr plan = SPI_prepare(qStr.c_str(), 0, NULL);
-    if (plan == NULL) {
-        std::cerr << "[SPIReader] SPI_prepare failed" << std::endl;
-        SPI_finish();
-        return -1;
-    }
+    if (!plan) { SPI_finish(); return -1; }
     
-    // Open cursor with the prepared plan
     Portal portal = SPI_cursor_open(NULL, plan, NULL, NULL, true);
-    if (portal == NULL) {
-        std::cerr << "[SPIReader] SPI_cursor_open failed" << std::endl;
-        SPI_finish();
-        return -1;
-    }
+    if (!portal) { SPI_finish(); return -1; }
     
     std::cerr << "[SPIReader] Cursor opened successfully" << std::endl;
 
-    long fetch_size = 10000; // adjustable batch size
+    long fetch_size = 2000; // adjustable batch size
     bool more_data = true;
     long total_fetched = 0;
     
-    int curBid = xdbcEnv->freeBufferPtr->pop();
-    
-    // CRITICAL FIX: Zero-initialize first buffer to prevent stale data
-    // from previous session causing memory corruption
-    std::memset(bp[curBid].data(), 0, bp[curBid].size());
-    
-    Header *head = reinterpret_cast<Header *>(bp[curBid].data());
-    char *writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
-    size_t currentBufferUsed = 0;
-
-    // Prepare Datum/Null arrays
+    // Reusable arrays for Datums
     int capacity_natts = 0;
     Datum *values = nullptr;
     bool *nulls = nullptr;
-    
-    // Reuse string buffer to avoid allocations per row
-    std::string row_str;
-    row_str.reserve(1024);
 
-    int batch_num = 0;
     while (more_data) {
+        // Get a free batch buffer
+        RawBatch* batch = freeBatchQueue->pop();
+        if(!batch) break; // Should not happen unless error
+        batch->reset();
+
         SPI_cursor_fetch(portal, true, fetch_size);
-        
         if (SPI_processed == 0) {
+            freeBatchQueue->push(batch); // Return unused
             more_data = false;
             break;
         }
 
-        // Save the tuple table pointer locally
         SPITupleTable *tuptable = SPI_tuptable;
         uint64 processed = SPI_processed;
         TupleDesc tupdesc = tuptable->tupdesc;
 
-        // Ensure we have enough space for execution
         if (tupdesc->natts > capacity_natts) {
              if (values) pfree(values);
              if (nulls) pfree(nulls);
@@ -158,77 +144,116 @@ int SPIReader::readSPI() {
         }
 
         for (uint64_t i = 0; i < processed; i++) {
-            row_str.clear();
-            
-            // Deform tuple into Datums
             heap_deform_tuple(tuptable->vals[i], tupdesc, values, nulls);
             
-            for (int j = 0; j < tupdesc->natts; j++) {
-                if (nulls[j]) {
-                    // Null handling (print nothing, just separate)
-                } else {
-                     // Check type from Schema or TupDesc? 
-                     // Using xdbcEnv->schema serves as our "expected" type map.
-                     // We match j-th attribute to j-th schema entry.
-                     // (Assuming order matches query: SELECT * matches schema order)
-                     
-                     if (j < xdbcEnv->schema.size()) {
-                         char tpe = xdbcEnv->schema[j].tpe[0];
-                         
-                         if (tpe == 'I') { // Integer
-                             int32 val = DatumGetInt32(values[j]);
-                             char buf[32];
-                             auto res = std::to_chars(buf, buf + 32, val);
-                             if (res.ec == std::errc()) {
-                                 row_str.append(buf, res.ptr - buf);
-                             }
-                         } else if (tpe == 'D') { // Double
-                             float8 val = DatumGetFloat8(values[j]);
-                             char buf[64];
-                             #if __cpp_lib_to_chars >= 201611L
-                                 auto res = std::to_chars(buf, buf + 64, val);
-                                 if (res.ec == std::errc()) {
-                                     row_str.append(buf, res.ptr - buf);
-                                 }
-                             #else
-                                 int len = sprintf(buf, "%.15g", val);
-                                 row_str.append(buf, len);
-                             #endif
-                         } else if (tpe == 'S' || tpe == 'C') { // String/Char
-                             // Detoast if necessary
-                             struct varlena *v = (struct varlena *) DatumGetPointer(values[j]);
-                             
-                             // Need to handle detoasting safely
-                             struct varlena *detoasted = PG_DETOAST_DATUM_PACKED(values[j]);
-                             char *str_data = VARDATA_ANY(detoasted);
-                             int str_len = VARSIZE_ANY_EXHDR(detoasted);
-                             
-                             row_str.append(str_data, str_len);
-                             
-                             if ((void *)detoasted != (void *)v) {
-                                 pfree(detoasted);
-                             }
-                         } else {
-                             // Fallback
-                             char *val = SPI_getvalue(tuptable->vals[i], tupdesc, j + 1);
-                             if (val) {
-                                row_str.append(val);
-                                pfree(val);
-                             }
-                         }
-                     } else {
-                         // Schema mismatch or extra columns? Fallback
-                         char *val = SPI_getvalue(tuptable->vals[i], tupdesc, j + 1);
-                         if (val) {
-                            row_str.append(val);
-                            pfree(val);
-                         }
-                     }
+            // Serialize row to RawBatch
+            for (int j = 0; j < xdbcEnv->schema.size(); j++) {
+                char tpe = xdbcEnv->schema[j].tpe[0];
+                bool isNull = (j < tupdesc->natts) ? nulls[j] : true;
+                
+                // Write Null Flag (1=NotNull, 0=Null)
+                char notNullFlag = isNull ? 0 : 1;
+                batch->data.push_back(notNullFlag);
+                
+                if (!isNull) {
+                    if (tpe == 'I') {
+                        int32 val = DatumGetInt32(values[j]);
+                        char* ptr = (char*)&val;
+                        batch->data.insert(batch->data.end(), ptr, ptr + 4);
+                    } else if (tpe == 'D') {
+                        float8 val = DatumGetFloat8(values[j]);
+                        char* ptr = (char*)&val;
+                        batch->data.insert(batch->data.end(), ptr, ptr + 8);
+                    } else if (tpe == 'S' || tpe == 'C') {
+                        struct varlena *detoasted = PG_DETOAST_DATUM_PACKED(values[j]);
+                        char *str_data = VARDATA_ANY(detoasted);
+                        int str_len = VARSIZE_ANY_EXHDR(detoasted);
+                        
+                        // Write Length
+                        char* lenPtr = (char*)&str_len;
+                        batch->data.insert(batch->data.end(), lenPtr, lenPtr + 4);
+                        // Write Data
+                        batch->data.insert(batch->data.end(), str_data, str_data + str_len);
+                        
+                        if ((void *)detoasted != (void *)DatumGetPointer(values[j])) {
+                            pfree(detoasted);
+                        }
+                    } else {
+                         // Fallback for unknown types (ignore or empty)
+                         char t = 0;
+                         batch->data.push_back(t); // Dummy length 0
+                    }
                 }
+            }
+            batch->rowCount++;
+        }
+        
+        SPI_freetuptable(tuptable);
+        total_fetched += processed;
+        
+        // Push full batch to consumer
+        batchQueue->push(batch);
+    }
+    
+    if (values) pfree(values);
+    if (nulls) pfree(nulls);
 
-                if (j < tupdesc->natts - 1) {
-                    row_str += "|";
+    SPI_cursor_close(portal);
+    SPI_finish();
+    MemoryContextSwitchTo(oldcontext);
+
+    std::cerr << "[SPIReader] Producer finished. Total rows: " << total_fetched << std::endl;
+    return total_fetched;
+}
+
+
+void SPIReader::processBatches() {
+    int curBid = xdbcEnv->freeBufferPtr->pop();
+    std::memset(bp[curBid].data(), 0, bp[curBid].size());
+    
+    Header *head = reinterpret_cast<Header *>(bp[curBid].data());
+    char *writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
+    size_t currentBufferUsed = 0;
+    
+    std::string row_str;
+    row_str.reserve(1024);
+    
+    while(true) {
+        RawBatch* batch = batchQueue->pop();
+        if (!batch) break; // Sentinel
+        
+        const char* readPtr = batch->data.data();
+        const char* endPtr = readPtr + batch->data.size();
+        
+        for(int i=0; i<batch->rowCount; ++i) {
+            row_str.clear();
+            
+            for (int j = 0; j < xdbcEnv->schema.size(); j++) {
+                char tpe = xdbcEnv->schema[j].tpe[0];
+                char notNullFlag = *readPtr++;
+                
+                if (notNullFlag) {
+                    if (tpe == 'I') {
+                        int32 val;
+                        memcpy(&val, readPtr, 4); readPtr += 4;
+                        char buf[32];
+                        auto res = std::to_chars(buf, buf + 32, val);
+                        row_str.append(buf, res.ptr - buf);
+                    } else if (tpe == 'D') {
+                        float8 val;
+                        memcpy(&val, readPtr, 8); readPtr += 8;
+                        char buf[64];
+                        auto res = std::to_chars(buf, buf + 64, val);
+                        row_str.append(buf, res.ptr - buf);
+                    } else if (tpe == 'S' || tpe == 'C') {
+                        int len;
+                        memcpy(&len, readPtr, 4); readPtr += 4;
+                        row_str.append(readPtr, len);
+                        readPtr += len;
+                    }
                 }
+                
+                if (j < xdbcEnv->schema.size() - 1) row_str += "|";
             }
             row_str += "\n";
             
@@ -239,9 +264,7 @@ int SPIReader::readSPI() {
                  xdbcEnv->deserBufferPtr->push(curBid);
                  
                  curBid = xdbcEnv->freeBufferPtr->pop();
-                 // Memset only header + some safety? Memset full buffer is expensive?
-                 // Original code memset full buffer. Let's keep it for safety.
-                 // std::memset(bp[curBid].data(), 0, bp[curBid].size()); // Optional optimization: skip this if not strictly needed
+                 std::memset(bp[curBid].data(), 0, bp[curBid].size()); // Safety
                  
                  head = reinterpret_cast<Header *>(bp[curBid].data());
                  writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
@@ -253,40 +276,22 @@ int SPIReader::readSPI() {
             currentBufferUsed += row_str.length();
         }
         
-        SPI_freetuptable(tuptable);
-        total_fetched += processed;
-        batch_num++;
+        freeBatchQueue->push(batch);
     }
     
-    if (values) pfree(values);
-    if (nulls) pfree(nulls);
-
-    SPI_cursor_close(portal);
-    SPI_finish();
-    
-    // CRITICAL FIX: Restore original memory context
-    // Ensures we don't leak into wrong context
-    MemoryContextSwitchTo(oldcontext);
-
     // Push last buffer
     if (currentBufferUsed > 0) {
          head->totalSize = currentBufferUsed;
          head->totalTuples = 0;
          xdbcEnv->deserBufferPtr->push(curBid);
     } else {
-         // Return unused buffer
          xdbcEnv->freeBufferPtr->push(curBid);
     }
 
-    // Signal end to deserializers (Since read_parallelism is 1 for SPI)
+    // Terminate downstream
     xdbcEnv->finishedReadThreads.store(1);
-    
-    // Push poison pills for deserializers
     for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
         xdbcEnv->deserBufferPtr->push(-1);
-    
-    std::cerr << "[SPIReader] SPI Read finished. Total rows: " << total_fetched << std::endl;
-    return total_fetched;
 }
 
 // Ensure we have the deserialize templates available
