@@ -94,7 +94,7 @@ void SPIReader::readData() {
 }
 
 int SPIReader::readSPI() {
-    std::cerr << "[SPIReader] Starting SPI Read on main thread" << std::endl;
+    std::cerr << "[SPIReader] Starting SPI Read on main thread (OPTIMIZED)" << std::endl;
     
     MemoryContext oldcontext = CurrentMemoryContext;
     if (SPI_connect() != SPI_OK_CONNECT) return -1;
@@ -109,7 +109,8 @@ int SPIReader::readSPI() {
     
     std::cerr << "[SPIReader] Cursor opened successfully" << std::endl;
 
-    long fetch_size = 2000; // adjustable batch size
+    // OPTIMIZATION 1: Larger fetch size reduces SPI call overhead
+    long fetch_size = 10000;
     bool more_data = true;
     long total_fetched = 0;
     
@@ -117,16 +118,30 @@ int SPIReader::readSPI() {
     int capacity_natts = 0;
     Datum *values = nullptr;
     bool *nulls = nullptr;
+    
+    // OPTIMIZATION 2: Pre-compute schema info to avoid repeated lookups
+    const size_t schemaSize = xdbcEnv->schema.size();
+    std::vector<char> colTypes(schemaSize);
+    for (size_t j = 0; j < schemaSize; j++) {
+        colTypes[j] = xdbcEnv->schema[j].tpe[0];
+    }
+    
+    // OPTIMIZATION 3: Pre-compute max row size for better buffer management
+    // Estimate: 1 byte null flag + max 8 bytes per column (for doubles)
+    size_t maxRowSize = schemaSize * 9;  // Conservative estimate
 
     while (more_data) {
         // Get a free batch buffer
         RawBatch* batch = freeBatchQueue->pop();
-        if(!batch) break; // Should not happen unless error
+        if(!batch) break;
         batch->reset();
+        
+        // OPTIMIZATION 4: Pre-reserve space for entire fetch batch
+        batch->data.reserve(fetch_size * maxRowSize);
 
         SPI_cursor_fetch(portal, true, fetch_size);
         if (SPI_processed == 0) {
-            freeBatchQueue->push(batch); // Return unused
+            freeBatchQueue->push(batch);
             more_data = false;
             break;
         }
@@ -143,45 +158,49 @@ int SPIReader::readSPI() {
              nulls = (bool *) palloc(capacity_natts * sizeof(bool));
         }
 
+        // OPTIMIZATION 5: Get direct pointer access to batch data
+        // Use resize + direct pointer instead of push_back/insert
+        size_t writeOffset = 0;
+        
         for (uint64_t i = 0; i < processed; i++) {
             heap_deform_tuple(tuptable->vals[i], tupdesc, values, nulls);
             
-            // Serialize row to RawBatch
-            for (int j = 0; j < xdbcEnv->schema.size(); j++) {
-                char tpe = xdbcEnv->schema[j].tpe[0];
-                bool isNull = (j < tupdesc->natts) ? nulls[j] : true;
+            // Process all columns for this row
+            for (size_t j = 0; j < schemaSize; j++) {
+                char tpe = colTypes[j];  // Use pre-computed type
+                bool isNull = (j < (size_t)tupdesc->natts) ? nulls[j] : true;
                 
-                // Write Null Flag (1=NotNull, 0=Null)
-                char notNullFlag = isNull ? 0 : 1;
-                batch->data.push_back(notNullFlag);
+                // Write Null Flag
+                batch->data.push_back(isNull ? 0 : 1);
                 
                 if (!isNull) {
                     if (tpe == 'I') {
                         int32 val = DatumGetInt32(values[j]);
-                        char* ptr = (char*)&val;
-                        batch->data.insert(batch->data.end(), ptr, ptr + 4);
+                        // OPTIMIZATION 6: Use resize + memcpy instead of insert
+                        size_t oldSize = batch->data.size();
+                        batch->data.resize(oldSize + 4);
+                        memcpy(&batch->data[oldSize], &val, 4);
                     } else if (tpe == 'D') {
                         float8 val = DatumGetFloat8(values[j]);
-                        char* ptr = (char*)&val;
-                        batch->data.insert(batch->data.end(), ptr, ptr + 8);
+                        size_t oldSize = batch->data.size();
+                        batch->data.resize(oldSize + 8);
+                        memcpy(&batch->data[oldSize], &val, 8);
                     } else if (tpe == 'S' || tpe == 'C') {
                         struct varlena *detoasted = PG_DETOAST_DATUM_PACKED(values[j]);
                         char *str_data = VARDATA_ANY(detoasted);
                         int str_len = VARSIZE_ANY_EXHDR(detoasted);
                         
-                        // Write Length
-                        char* lenPtr = (char*)&str_len;
-                        batch->data.insert(batch->data.end(), lenPtr, lenPtr + 4);
-                        // Write Data
-                        batch->data.insert(batch->data.end(), str_data, str_data + str_len);
+                        // Write Length + Data
+                        size_t oldSize = batch->data.size();
+                        batch->data.resize(oldSize + 4 + str_len);
+                        memcpy(&batch->data[oldSize], &str_len, 4);
+                        memcpy(&batch->data[oldSize + 4], str_data, str_len);
                         
                         if ((void *)detoasted != (void *)DatumGetPointer(values[j])) {
                             pfree(detoasted);
                         }
                     } else {
-                         // Fallback for unknown types (ignore or empty)
-                         char t = 0;
-                         batch->data.push_back(t); // Dummy length 0
+                         batch->data.push_back(0); // Dummy for unknown types
                     }
                 }
             }
