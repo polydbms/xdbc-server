@@ -208,6 +208,20 @@ int SPIReader::readSPI() {
 
 
 void SPIReader::processBatches() {
+    std::cerr << "[SPIReader] processBatches: skip_deserializer = " 
+              << (xdbcEnv->skip_deserializer ? "TRUE" : "FALSE") << std::endl;
+    
+    if (xdbcEnv->skip_deserializer) {
+        std::cerr << "[SPIReader] -> Taking BINARY path (processBatchesBinary)" << std::endl;
+        processBatchesBinary();
+    } else {
+        std::cerr << "[SPIReader] -> Taking TEXT path (processBatchesText)" << std::endl;
+        processBatchesText();
+    }
+}
+
+void SPIReader::processBatchesText() {
+    // EXISTING TEXT MODE - kept unchanged
     int curBid = xdbcEnv->freeBufferPtr->pop();
     std::memset(bp[curBid].data(), 0, bp[curBid].size());
     
@@ -294,6 +308,116 @@ void SPIReader::processBatches() {
         xdbcEnv->deserBufferPtr->push(-1);
 }
 
+void SPIReader::processBatchesBinary() {
+    // NEW BINARY MODE - writes directly to compressor, bypassing deserializer
+    int curBid = xdbcEnv->freeBufferPtr->pop();
+    std::memset(bp[curBid].data(), 0, bp[curBid].size());
+    
+    Header *head = reinterpret_cast<Header *>(bp[curBid].data());
+    char *writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
+    int tupleCount = 0;
+    
+    // Pre-compute column offsets in schema
+    std::vector<size_t> offsetsInTuple(xdbcEnv->schema.size());
+    size_t offset = 0;
+    for (int j = 0; j < xdbcEnv->schema.size(); j++) {
+        offsetsInTuple[j] = offset;
+        offset += xdbcEnv->schema[j].size;
+    }
+    
+    while(true) {
+        RawBatch* batch = batchQueue->pop();
+        if (!batch) break; // Sentinel
+        
+        const char* readPtr = batch->data.data();
+        
+        for(int i=0; i<batch->rowCount; ++i) {
+            // For each row, convert RawBatch binary format to intermediate binary format
+            for (int j = 0; j < xdbcEnv->schema.size(); j++) {
+                char tpe = xdbcEnv->schema[j].tpe[0];
+                char notNullFlag = *readPtr++;
+                
+                void *dest;
+                if (xdbcEnv->iformat == 1) { // Row-major
+                    dest = writePtr + tupleCount * xdbcEnv->tuple_size + offsetsInTuple[j];
+                } else if (xdbcEnv->iformat == 2) { // Column-major
+                    dest = writePtr + offsetsInTuple[j] * xdbcEnv->tuples_per_buffer + 
+                           tupleCount * xdbcEnv->schema[j].size;
+                } else {
+                    // Unsupported format, fallback to row-major
+                    dest = writePtr + tupleCount * xdbcEnv->tuple_size + offsetsInTuple[j];
+                }
+                
+                if (notNullFlag) {
+                    if (tpe == 'I') {
+                        memcpy(dest, readPtr, 4);
+                        readPtr += 4;
+                    } else if (tpe == 'D') {
+                        memcpy(dest, readPtr, 8);
+                        readPtr += 8;
+                    } else if (tpe == 'S' || tpe == 'C') {
+                        int len;
+                        memcpy(&len, readPtr, 4); readPtr += 4;
+                        // Pad/truncate to schema size
+                        int copyLen = std::min(len, xdbcEnv->schema[j].size);
+                        memcpy(dest, readPtr, copyLen);
+                        if (copyLen < xdbcEnv->schema[j].size) {
+                            memset((char*)dest + copyLen, 0, xdbcEnv->schema[j].size - copyLen);
+                        }
+                        readPtr += len;
+                    }
+                } else {
+                    // Write zeros for NULL values
+                    memset(dest, 0, xdbcEnv->schema[j].size);
+                }
+            }
+            
+            tupleCount++;
+            
+            // Check if buffer is full
+            if (tupleCount == xdbcEnv->tuples_per_buffer) {
+                head->totalTuples = tupleCount;
+                head->totalSize = tupleCount * xdbcEnv->tuple_size;
+                head->intermediateFormat = xdbcEnv->iformat;
+                
+                // Push to DESER queue for pass through (matching PQReader pattern)
+                xdbcEnv->deserBufferPtr->push(curBid);
+                
+                curBid = xdbcEnv->freeBufferPtr->pop();
+                std::memset(bp[curBid].data(), 0, bp[curBid].size());
+                head = reinterpret_cast<Header *>(bp[curBid].data());
+                writePtr = reinterpret_cast<char*>(bp[curBid].data() + sizeof(Header));
+                tupleCount = 0;
+            }
+        }
+        
+        freeBatchQueue->push(batch);
+    }
+    
+    // Push last partial buffer
+    if (tupleCount > 0) {
+        head->totalTuples = tupleCount;
+        head->totalSize = tupleCount * xdbcEnv->tuple_size;
+        if (xdbcEnv->iformat == 2) {
+            head->totalSize = xdbcEnv->tuples_per_buffer * xdbcEnv->tuple_size;
+        }
+        head->intermediateFormat = xdbcEnv->iformat;
+        // CRITICAL: Push to DESER queue, not COMP queue!
+        // Deserializer threads will passthrough when skip=on
+        xdbcEnv->deserBufferPtr->push(curBid);
+    } else {
+        xdbcEnv->freeBufferPtr->push(curBid);
+    }
+    
+    std::cerr << "[SPIReader] processBatchesBinary FINISHED - pushed " << tupleCount 
+              << " final tuples to deserializer queue" << std::endl;
+    
+    // Signal deserializer threads to finish (they will passthrough and signal compressor)
+    xdbcEnv->finishedReadThreads.store(1);
+    for (int i = 0; i < xdbcEnv->deser_parallelism; i++)
+        xdbcEnv->deserBufferPtr->push(-1);
+}
+
 // Ensure we have the deserialize templates available
 #include "../deserializers.h"
 #include "../fast_float.h"
@@ -304,11 +428,27 @@ void SPIReader::processBatches() {
 
 int SPIReader::deserializeSPI(int thr, int &totalThreadWrittenTuples, int &totalThreadWrittenBuffers) {
     
-    // Logic identical to PGReader::deserializePG
-    // We need to copy-paste it because we can't easily inherit it without making it protected in PGReader
-    // or moving it to a common base/helper.
-    // Given the task, copy-paste is safer than refactoring PGReader right now.
+    // Passthrough mode when skip_deserializer is enabled
+    if (xdbcEnv->skip_deserializer) {
+        while (true) {
+            int inBid = xdbcEnv->deserBufferPtr->pop();
+            if (inBid == -1) break;
+            
+            xdbcEnv->compBufferPtr->push(inBid);
+            totalThreadWrittenBuffers++;
+        }
+        
+        // Signal completion
+        xdbcEnv->finishedDeserThreads.fetch_add(1);
+        if (xdbcEnv->finishedDeserThreads == xdbcEnv->deser_parallelism) {
+            for (int i = 0; i < xdbcEnv->compression_parallelism; i++)
+                xdbcEnv->compBufferPtr->push(-1);
+        }
+        
+        return 1;
+    }
     
+    // TEXT DESERIALIZATION MODE (existing logic)
     int outBid;
     size_t readOffset = 0;
     const char *endPtr;

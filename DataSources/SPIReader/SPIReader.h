@@ -39,6 +39,8 @@ private:
     };
 
     void processBatches(); // Consumer thread function
+    void processBatchesText(); // Text mode (existing behavior)
+    void processBatchesBinary(); // Binary mode (skip_deserializer optimization)
 
     std::atomic<bool> finishedReading;
     std::atomic<int> totalReadBuffers;
