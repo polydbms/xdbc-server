@@ -70,6 +70,8 @@ ADD xdbcserver.h /xdbc-server/
 ADD metrics_calculator.h /xdbc-server/
 ADD Compression /xdbc-server/Compression
 ADD DataSources /xdbc-server/DataSources
+ADD ControllerInterface /xdbc-server/ControllerInterface
+ADD EnvironmentReconfigure /xdbc-server/EnvironmentReconfigure
 RUN ls /xdbc-server
 
 RUN rm -rf  /xdbc-server/CMakeCache.txt
